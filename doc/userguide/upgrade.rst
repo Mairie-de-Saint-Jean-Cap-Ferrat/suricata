@@ -52,7 +52,7 @@ Major changes
   for the ``stats`` event.
 - Stats counters that are 0 can now be hidden from EVE logs. Default behavior
   still logs those (see :ref:`EVE Output - Stats <eve-json-output-stats>` for configuration setting).
-- SDP parser and logger have been introduced.
+- SDP parser, logger and sticky buffers have been introduced.
   Due to SDP being encapsulated within other protocols, such as SIP, they cannot be directly enabled or disabled.
   Instead, both the SDP parser and logger depend on being invoked by another parser (or logger).
 - ARP decoder and logger have been introduced.
@@ -153,6 +153,11 @@ Deprecations
 - The ``syslog`` output is now deprecated and will be removed in
   Suricata 9.0. Note that this is the standalone ``syslog`` output and
   does affect the ``eve`` outputs ability to send to syslog.
+
+Keyword changes
+~~~~~~~~~~~~~~~
+- ``ja3.hash`` and ``ja3s.hash`` no longer accept contents with non hexadecimal
+  characters, as they will never match.
 
 Logging changes
 ~~~~~~~~~~~~~~~
