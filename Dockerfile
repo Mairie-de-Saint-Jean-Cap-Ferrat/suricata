@@ -24,8 +24,8 @@ RUN apt-get update && \
     procps \
     net-tools \
     sudo
-    
-# Installation de Suricata (méthode alternative sans PPA)
+
+# Installation de Suricata via PPA
 RUN add-apt-repository ppa:oisf/suricata-stable && \
     apt-get update && \
     apt-get install -y suricata && \
@@ -48,25 +48,20 @@ RUN add-apt-repository ppa:oisf/suricata-stable && \
     make \
     libmagic-dev \
     libjansson-dev \
-    libnss3-dev \
-    libnspr4-dev \
-    libsuricata-dev \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Vérifier que Suricata est bien installé
-RUN suricata --build-info && \
-    suricata -V
-
-# Pour le mode IPS, installer les dépendances requises
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+    rustc \
+    cargo \
+    jq \
+    git-core \
     libnetfilter-queue-dev \
     libnetfilter-queue1 \
     libnfnetlink-dev \
     libnfnetlink0 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# Vérifier que Suricata est bien installé
+RUN suricata --build-info && \
+    suricata -V
 
 # Mise à jour des règles Suricata
 RUN suricata-update update-sources && \

@@ -7,6 +7,8 @@ set -e
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="${SCRIPT_DIR}/suricata-build.conf"
+ENTRYPOINT_FILE="${SCRIPT_DIR}/entrypoint.sh"
+ENTRYPOINT_TEMPLATE="${SCRIPT_DIR}/entrypoint.sh.template"
 
 # Options par défaut
 MODE="ids"
@@ -17,6 +19,8 @@ BUILD_ARGS=""
 VOLUME_LOGS="/var/log/suricata"
 VOLUME_CONFIG="/etc/suricata"
 RUN_DETACHED=false
+RUNMODE="auto"
+CUSTOM_ENTRYPOINT=false
 
 # Couleurs pour une meilleure lisibilité
 RED='\033[0;31m'
@@ -70,6 +74,8 @@ DOCKER_TAG=$DOCKER_TAG
 VOLUME_LOGS=$VOLUME_LOGS
 VOLUME_CONFIG=$VOLUME_CONFIG
 RUN_DETACHED=$RUN_DETACHED
+RUNMODE=$RUNMODE
+CUSTOM_ENTRYPOINT=$CUSTOM_ENTRYPOINT
 EOF
 }
 
@@ -212,6 +218,109 @@ ask_no_cache() {
   fi
 }
 
+# Fonction pour personnaliser l'entrypoint
+customize_entrypoint() {
+  print_title "PERSONNALISATION DU SCRIPT ENTRYPOINT"
+  echo "Vous pouvez personnaliser le script d'entrée qui sera exécuté au démarrage du conteneur"
+  
+  ask_question "Personnaliser le script entrypoint.sh? (o/n) [défaut: non]: "
+  read -r response
+  
+  if [[ "$response" =~ ^[oOyY]$ ]]; then
+    CUSTOM_ENTRYPOINT=true
+    
+    # Demander le mode d'exécution (auto, workers, autofp)
+    print_title "MODE D'EXÉCUTION"
+    echo "Modes disponibles:"
+    echo "1) auto - Automatique (par défaut)"
+    echo "2) workers - Un thread par CPU"
+    echo "3) autofp - Flux parallélisés"
+    
+    ask_question "Choisissez le mode d'exécution [1-3, défaut: auto]: "
+    read -r runmode_choice
+    
+    case $runmode_choice in
+      2)
+        RUNMODE="workers"
+        print_info "Mode workers sélectionné"
+        ;;
+      3)
+        RUNMODE="autofp"
+        print_info "Mode autofp sélectionné"
+        ;;
+      *)
+        RUNMODE="auto"
+        print_info "Mode auto sélectionné (par défaut)"
+        ;;
+    esac
+    
+    # Créer l'entrypoint personnalisé
+    print_info "Création du script entrypoint.sh personnalisé"
+    cat > "$ENTRYPOINT_FILE" << EOF
+#!/bin/bash
+
+# Script d'entrée pour conteneur Suricata basé sur PPA
+set -e
+
+# Valeurs par défaut
+INTERFACE=\${INTERFACE:-"$INTERFACE"}
+HOME_NET=\${HOME_NET:-"$HOME_NET"}
+MODE=\${MODE:-"$MODE"}
+RUNMODE=\${RUNMODE:-"$RUNMODE"}
+CONFIG_FILE="/etc/suricata/suricata.yaml"
+
+echo "Configuration Suricata..."
+echo "Interface: \$INTERFACE"
+echo "HOME_NET: \$HOME_NET"
+echo "Mode: \$MODE"
+echo "Runmode: \$RUNMODE"
+
+# Vérification des paramètres de configuration
+if [ ! -f "\$CONFIG_FILE" ]; then
+    echo "ERREUR: Fichier de configuration \$CONFIG_FILE non trouvé"
+    exit 1
+fi
+
+# Mettre à jour l'interface dans la configuration
+sed -i "s/^  - interface:.*\$/  - interface: \$INTERFACE/" \$CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour l'interface"
+
+# Mettre à jour HOME_NET dans la configuration
+sed -i "s/HOME_NET:.*\$/HOME_NET: \$HOME_NET/" \$CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour HOME_NET"
+
+# Mettre à jour le runmode dans la configuration
+sed -i "s/^  runmode:.*\$/  runmode: \$RUNMODE/" \$CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour le runmode"
+
+# Vérification des permissions sur les répertoires de logs
+if [ ! -w "/var/log/suricata" ]; then
+    echo "Création/correction des permissions du répertoire /var/log/suricata"
+    mkdir -p /var/log/suricata
+    chmod 755 /var/log/suricata
+fi
+
+# Mise à jour des règles Suricata
+echo "Mise à jour des règles Suricata..."
+suricata-update 2>/dev/null || echo "Erreur lors de la mise à jour des règles, utilisation des règles existantes"
+
+# Choix du mode de démarrage
+case \$MODE in
+    "ips")
+        echo "Démarrage de Suricata en mode IPS avec NFQ"
+        exec suricata -c \$CONFIG_FILE --pidfile /var/run/suricata.pid -q 0 -v "\$@"
+        ;;
+    "ids"|*)
+        echo "Démarrage de Suricata en mode IDS"
+        exec suricata -c \$CONFIG_FILE --pidfile /var/run/suricata.pid -i \$INTERFACE -v "\$@"
+        ;;
+esac
+EOF
+    chmod +x "$ENTRYPOINT_FILE"
+    print_info "Script entrypoint.sh personnalisé créé et configuré"
+  else
+    CUSTOM_ENTRYPOINT=false
+    print_info "Script entrypoint.sh standard sera utilisé"
+  fi
+}
+
 # Afficher le titre principal
 clear
 print_title "ASSISTANT DE CONSTRUCTION D'IMAGE DOCKER SURICATA"
@@ -228,6 +337,7 @@ ask_volume_logs
 ask_volume_config
 ask_detached
 ask_no_cache
+customize_entrypoint
 
 # Sauvegarder la configuration mise à jour
 save_config
@@ -241,6 +351,12 @@ print_info "Tag Docker: $DOCKER_TAG"
 print_info "Volume logs: $VOLUME_LOGS"
 print_info "Volume config: $VOLUME_CONFIG"
 print_info "Mode détaché: $RUN_DETACHED"
+if [ "$CUSTOM_ENTRYPOINT" = true ]; then
+  print_info "Entrypoint personnalisé: Oui"
+  print_info "Runmode: $RUNMODE"
+else
+  print_info "Entrypoint personnalisé: Non"
+fi
 
 # Demander confirmation
 ask_question "Continuer avec ces paramètres? (o/n)"
@@ -251,8 +367,8 @@ if [[ ! "$confirm" =~ ^[oOyY]$ ]]; then
 fi
 
 # Vérifier si le fichier entrypoint.sh existe
-if [ ! -f "${SCRIPT_DIR}/entrypoint.sh" ]; then
-  print_error "Erreur: Script entrypoint.sh non trouvé dans ${SCRIPT_DIR}"
+if [ ! -f "$ENTRYPOINT_FILE" ]; then
+  print_error "Erreur: Script entrypoint.sh non trouvé dans $ENTRYPOINT_FILE"
   exit 1
 fi
 
@@ -299,6 +415,11 @@ if [ $? -eq 0 ]; then
   # Ajouter le mode si c'est IPS
   if [ "$MODE" = "ips" ]; then
     DOCKER_RUN_CMD="$DOCKER_RUN_CMD -e MODE=ips"
+  fi
+  
+  # Ajouter le runmode si un entrypoint personnalisé a été créé
+  if [ "$CUSTOM_ENTRYPOINT" = true ]; then
+    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -e RUNMODE=$RUNMODE"
   fi
   
   # Ajouter le tag de l'image
