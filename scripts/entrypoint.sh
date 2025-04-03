@@ -7,32 +7,46 @@ set -e
 INTERFACE=${INTERFACE:-"eth0"}
 MODE=${MODE:-"ids"}
 CONFIG_FILE="/etc/suricata/suricata.yaml"
+CONFIG_STAGING_DIR="/config-staging"
+CONFIG_STAGING_FILE="$CONFIG_STAGING_DIR/suricata.yaml"
 
 echo "Démarrage Suricata..."
 echo "Interface spécifiée (via env): $INTERFACE"
 echo "Mode spécifié (via env): $MODE"
-echo "Configuration attendue: $CONFIG_FILE"
+echo "Configuration finale attendue: $CONFIG_FILE"
+echo "Recherche de la configuration fournie via volume dans $CONFIG_STAGING_FILE"
 
-# --- DEBUT DIAGNOSTIC --- #
-echo "Vérification du point de montage /etc/suricata ..."
-ls -ld /etc/suricata
-echo "Vérification du contenu de /etc/suricata ..."
-ls -l /etc/suricata/
-echo "Tentative de lecture de $CONFIG_FILE ..."
-cat "$CONFIG_FILE" || echo "ERREUR: Impossible de lire $CONFIG_FILE"
-echo "Vérification des montages avec findmnt ..."
-findmnt /etc/suricata || echo "ERREUR: findmnt n'a pas trouvé le montage pour /etc/suricata"
-sleep 1
-# --- FIN DIAGNOSTIC --- #
-
-# Vérification que le fichier de configuration existe
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "ERREUR FATALE: Fichier de configuration $CONFIG_FILE non trouvé après diagnostics. Problème de montage de volume ?"
-    exit 1
+# Vérifier si la config fournie existe dans le staging
+if [ -f "$CONFIG_STAGING_FILE" ]; then
+    echo "Configuration trouvée dans $CONFIG_STAGING_FILE. Copie vers $CONFIG_FILE..."
+    # Assurer que le répertoire /etc/suricata existe (créé dans le Dockerfile)
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+    cp "$CONFIG_STAGING_FILE" "$CONFIG_FILE"
+    # Définir les permissions correctes après copie
+    chown suricata:suricata "$CONFIG_FILE"
+    chmod 640 "$CONFIG_FILE"
+else
+    echo "Attention: Aucune configuration fournie dans $CONFIG_STAGING_DIR via volume."
+    # Vérifier si le fichier de base existe (installé par PPA)
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "Utilisation de la configuration par défaut trouvée dans $CONFIG_FILE."
+    # Ou essayer de restaurer depuis la sauvegarde si elle existe
+    elif [ -f /etc/suricata.yaml.default ]; then
+        echo "Utilisation de la sauvegarde /etc/suricata.yaml.default."
+        cp /etc/suricata.yaml.default "$CONFIG_FILE"
+        chown suricata:suricata "$CONFIG_FILE"
+        chmod 640 "$CONFIG_FILE"
+    else
+        echo "ERREUR FATALE: Aucune configuration fournie et aucune configuration par défaut ou sauvegarde trouvée."
+        exit 1
+    fi
 fi
 
-# Les commandes sed pour modifier HOME_NET, INTERFACE et RUNMODE sont retirées
-# car le fichier est maintenant généré par docker-build.sh et fourni via volume.
+# Vérification que le fichier de configuration final existe
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERREUR FATALE: Fichier de configuration $CONFIG_FILE non trouvé après tentative de copie/restauration."
+    exit 1
+fi
 
 # Vérification des permissions sur les répertoires de logs (toujours utile)
 if [ ! -w "/var/log/suricata" ]; then

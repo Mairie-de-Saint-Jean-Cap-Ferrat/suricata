@@ -45,8 +45,8 @@ RUN suricata-update update-sources && \
     suricata-update || echo "Première mise à jour des règles échouée, sera retentée au démarrage."
 
 # Création de répertoires pour les volumes et PID file
-RUN mkdir -p /var/log/suricata /var/lib/suricata /var/run/suricata && \
-    chown -R suricata:suricata /var/log/suricata /var/lib/suricata /var/run/suricata
+RUN mkdir -p /var/log/suricata /var/lib/suricata /etc/suricata /var/run/suricata && \
+    chown -R suricata:suricata /var/log/suricata /var/lib/suricata /etc/suricata /var/run/suricata
 
 # Sauvegarder le fichier de configuration par défaut avant qu'il ne soit potentiellement masqué par un volume
 RUN cp /etc/suricata/suricata.yaml /etc/suricata.yaml.default

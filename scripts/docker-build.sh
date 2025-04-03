@@ -457,11 +457,15 @@ if [ $? -eq 0 ]; then
   fi
   
   if [ -n "$VOLUME_CONFIG" ]; then
-    # Créer le répertoire hôte s'il n'existe pas
-    mkdir -p "$VOLUME_CONFIG"
-    # Simplifier le chemin (sans / final)
-    host_config_path=$(echo "$VOLUME_CONFIG" | sed 's:/$::')
-    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -v $host_config_path:/etc/suricata"
+    # Créer le répertoire parent sur l'hôte s'il n'existe pas
+    mkdir -p "$VOLUME_CONFIG" # Assurer que le répertoire existe
+    # Monter le répertoire de configuration hôte dans un répertoire temporaire
+    host_config_path=$(echo "$VOLUME_CONFIG" | sed 's:/$::') # Retirer le / final si présent
+    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -v $host_config_path:/config-staging:ro" # Montage en lecture seule (ro) suffisant
+    # La vérification que le fichier .yaml existe à l'intérieur est toujours utile avant de lancer
+    if [ ! -f "$host_config_path/suricata.yaml" ]; then
+       print_warning "Attention: Le fichier suricata.yaml n'a pas été trouvé dans $host_config_path avant le lancement."
+    fi
   fi
   
   # Ajouter les variables d'environnement (SEULEMENT MODE et INTERFACE maintenant)
