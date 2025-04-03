@@ -1,76 +1,51 @@
 #!/bin/bash
 
-# Script d'entrée pour conteneur Suricata
+# Script d'entrée pour conteneur Suricata basé sur PPA
 set -e
 
-# Mode de fonctionnement par défaut
-RUNMODE="auto"
-ARGS=""
+# Valeurs par défaut
+INTERFACE=${INTERFACE:-"eth0"}
+HOME_NET=${HOME_NET:-"[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"}
+MODE=${MODE:-"ids"}
+RUNMODE=${RUNMODE:-"auto"}
+CONFIG_FILE="/etc/suricata/suricata.yaml"
 
-# Vérifier les arguments
-for arg in "$@"; do
-  case $arg in
-    --runmode=*)
-      RUNMODE="${arg#*=}"
-      shift
-      ;;
-    *)
-      # Passer les autres arguments à Suricata
-      ARGS="$ARGS $arg"
-      ;;
-  esac
-done
+echo "Configuration Suricata..."
+echo "Interface: $INTERFACE"
+echo "HOME_NET: $HOME_NET"
+echo "Mode: $MODE"
 
-# Déterminer l'interface si non spécifiée
-if ! grep -q "^  - interface:" /etc/suricata/suricata.yaml || grep -q "^  - interface: default" /etc/suricata/suricata.yaml; then
-  # Trouver l'interface avec une adresse IP (exclut lo)
-  INTERFACE=$(ip -o addr show | grep -v "lo:" | grep "inet " | head -n1 | awk '{print $2}')
-  if [ -n "$INTERFACE" ]; then
-    echo "Aucune interface spécifiée, utilisation automatique de: $INTERFACE"
-    sed -i "s/^  - interface:.*$/  - interface: $INTERFACE/" /etc/suricata/suricata.yaml
-  else
-    echo "Aucune interface réseau trouvée, utilisation du mode pcap-file par défaut"
-  fi
+# Vérification des paramètres de configuration
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERREUR: Fichier de configuration $CONFIG_FILE non trouvé"
+    exit 1
 fi
+
+# Mettre à jour l'interface dans la configuration
+sed -i "s/^  - interface:.*$/  - interface: $INTERFACE/" $CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour l'interface"
+
+# Mettre à jour HOME_NET dans la configuration
+sed -i "s/HOME_NET:.*$/HOME_NET: $HOME_NET/" $CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour HOME_NET"
 
 # Vérification des permissions sur les répertoires de logs
 if [ ! -w "/var/log/suricata" ]; then
-  echo "Attention: Le répertoire /var/log/suricata n'est pas accessible en écriture"
-  mkdir -p /var/log/suricata
-  chmod 755 /var/log/suricata
+    echo "Création/correction des permissions du répertoire /var/log/suricata"
+    mkdir -p /var/log/suricata
+    chmod 755 /var/log/suricata
 fi
 
-# Mise à jour des règles de Suricata
+# Mise à jour des règles Suricata
 echo "Mise à jour des règles Suricata..."
-suricata-update || echo "Erreur lors de la mise à jour des règles, utilisation des règles existantes"
+suricata-update 2>/dev/null || echo "Erreur lors de la mise à jour des règles, utilisation des règles existantes"
 
-# Démarrage de Suricata en fonction du mode
-case $RUNMODE in
-  "ids")
-    echo "Démarrage de Suricata en mode IDS"
-    exec suricata -c /etc/suricata/suricata.yaml $ARGS
-    ;;
-  "ips")
-    echo "Démarrage de Suricata en mode IPS inline"
-    exec suricata -c /etc/suricata/suricata.yaml --runmode=workers $ARGS
-    ;;
-  "pcap")
-    if [ -z "$ARGS" ]; then
-      echo "Erreur: Le mode pcap nécessite de spécifier un fichier pcap"
-      echo "Exemple: docker run --rm -v /path/to/pcaps:/pcaps suricata-image --runmode=pcap -r /pcaps/capture.pcap"
-      exit 1
-    fi
-    echo "Analyse du fichier pcap"
-    exec suricata -c /etc/suricata/suricata.yaml $ARGS
-    ;;
-  "auto"|*)
-    # Vérifier si on peut utiliser NFQ pour le mode IPS
-    if [ -d "/proc/sys/net/netfilter" ] && [ -e "/usr/lib/x86_64-linux-gnu/libnetfilter_queue.so.1" ]; then
-      echo "Démarrage de Suricata en mode IPS avec NFQ"
-      exec suricata -c /etc/suricata/suricata.yaml --runmode=workers $ARGS
-    else
-      echo "Démarrage de Suricata en mode IDS"
-      exec suricata -c /etc/suricata/suricata.yaml $ARGS
-    fi
-    ;;
+# Choix du mode de démarrage
+case $MODE in
+    "ips")
+        echo "Démarrage de Suricata en mode IPS avec NFQ"
+        exec suricata -c $CONFIG_FILE --pidfile /var/run/suricata.pid -q 0 -v "$@"
+        ;;
+    "ids"|*)
+        echo "Démarrage de Suricata en mode IDS"
+        exec suricata -c $CONFIG_FILE --pidfile /var/run/suricata.pid -i $INTERFACE -v "$@"
+        ;;
 esac 
