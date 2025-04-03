@@ -7,7 +7,7 @@ LABEL description="Image Docker pour Suricata IDS/IPS"
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Copier les fichiers de configuration
-COPY suricata-build.conf /tmp/
+COPY scripts/suricata-build.conf /tmp/
 
 # Mise à jour du système et installation des dépendances de base
 RUN apt-get update && \
@@ -69,7 +69,7 @@ RUN set -a && . /tmp/suricata-build.conf && set +a && \
     fi
 
 # Création d'un entrypoint pour démarrer Suricata
-COPY entrypoint.sh /entrypoint.sh
+COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Configuration du volume pour les règles et logs

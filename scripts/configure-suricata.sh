@@ -11,6 +11,7 @@ BRANCH="master"
 INTERFACE=""
 HOME_NET="[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
 EXTRA_CONFIGURE_OPTIONS=""
+DOCKER_TAG="suricata:latest"
 
 # Fonction d'affichage d'aide
 show_help() {
@@ -23,6 +24,7 @@ show_help() {
   echo "  --interface=INTERFACE       Interface réseau principale à surveiller"
   echo "  --home-net=NETWORK          Réseau HOME_NET (format: [192.168.0.0/16,10.0.0.0/8])"
   echo "  --configure-options=OPTIONS Options supplémentaires pour ./configure"
+  echo "  --docker-tag=TAG            Tag pour l'image Docker (défaut: suricata:latest)"
   echo "  --help                      Affiche cette aide"
   exit 0
 }
@@ -58,6 +60,10 @@ for arg in "$@"; do
       EXTRA_CONFIGURE_OPTIONS="${arg#*=}"
       shift
       ;;
+    --docker-tag=*)
+      DOCKER_TAG="${arg#*=}"
+      shift
+      ;;
     --help)
       show_help
       ;;
@@ -69,7 +75,8 @@ for arg in "$@"; do
 done
 
 # Création du fichier de configuration pour le Dockerfile
-cat > suricata-build.conf << EOF
+mkdir -p scripts
+cat > scripts/suricata-build.conf << EOF
 IPS_MODE=$IPS_MODE
 RUST_SUPPORT=$RUST_SUPPORT
 AUTO_SETUP=$AUTO_SETUP
@@ -77,10 +84,11 @@ BRANCH=$BRANCH
 INTERFACE=$INTERFACE
 HOME_NET=$HOME_NET
 EXTRA_CONFIGURE_OPTIONS=$EXTRA_CONFIGURE_OPTIONS
+DOCKER_TAG=$DOCKER_TAG
 EOF
 
-echo "Configuration enregistrée dans suricata-build.conf:"
-cat suricata-build.conf
+echo "Configuration enregistrée dans scripts/suricata-build.conf:"
+cat scripts/suricata-build.conf
 echo ""
 echo "Vous pouvez maintenant construire l'image Docker avec:"
-echo "docker build -t suricata-image ." 
+echo "./scripts/docker-build.sh" 
