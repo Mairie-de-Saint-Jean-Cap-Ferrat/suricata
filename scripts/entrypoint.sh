@@ -3,49 +3,63 @@
 # Script d'entrée pour conteneur Suricata basé sur PPA
 set -e
 
-# Valeurs par défaut
+# Valeurs par défaut (lues depuis les variables d'env du docker run)
 INTERFACE=${INTERFACE:-"eth0"}
-HOME_NET=${HOME_NET:-"[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"}
 MODE=${MODE:-"ids"}
-RUNMODE=${RUNMODE:-"auto"}
 CONFIG_FILE="/etc/suricata/suricata.yaml"
 
-echo "Configuration Suricata..."
-echo "Interface: $INTERFACE"
-echo "HOME_NET: $HOME_NET"
-echo "Mode: $MODE"
+echo "Démarrage Suricata..."
+echo "Interface spécifiée (via env): $INTERFACE"
+echo "Mode spécifié (via env): $MODE"
+echo "Configuration attendue: $CONFIG_FILE"
 
-# Vérification des paramètres de configuration
+# --- DEBUT DIAGNOSTIC --- #
+echo "Vérification du point de montage /etc/suricata ..."
+ls -ld /etc/suricata
+echo "Vérification du contenu de /etc/suricata ..."
+ls -l /etc/suricata/
+echo "Tentative de lecture de $CONFIG_FILE ..."
+cat "$CONFIG_FILE" || echo "ERREUR: Impossible de lire $CONFIG_FILE"
+echo "Vérification des montages avec findmnt ..."
+findmnt /etc/suricata || echo "ERREUR: findmnt n'a pas trouvé le montage pour /etc/suricata"
+sleep 1
+# --- FIN DIAGNOSTIC --- #
+
+# Vérification que le fichier de configuration existe
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo "ERREUR: Fichier de configuration $CONFIG_FILE non trouvé"
+    echo "ERREUR FATALE: Fichier de configuration $CONFIG_FILE non trouvé après diagnostics. Problème de montage de volume ?"
     exit 1
 fi
 
-# Mettre à jour l'interface dans la configuration
-sed -i "s/^  - interface:.*$/  - interface: $INTERFACE/" $CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour l'interface"
+# Les commandes sed pour modifier HOME_NET, INTERFACE et RUNMODE sont retirées
+# car le fichier est maintenant généré par docker-build.sh et fourni via volume.
 
-# Mettre à jour HOME_NET dans la configuration
-sed -i "s/HOME_NET:.*$/HOME_NET: $HOME_NET/" $CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour HOME_NET"
-
-# Vérification des permissions sur les répertoires de logs
+# Vérification des permissions sur les répertoires de logs (toujours utile)
 if [ ! -w "/var/log/suricata" ]; then
     echo "Création/correction des permissions du répertoire /var/log/suricata"
     mkdir -p /var/log/suricata
-    chmod 755 /var/log/suricata
+    chown suricata:suricata /var/log/suricata || echo "Impossible de changer le propriétaire de /var/log/suricata"
+    chmod 750 /var/log/suricata
 fi
 
-# Mise à jour des règles Suricata
-echo "Mise à jour des règles Suricata..."
-suricata-update 2>/dev/null || echo "Erreur lors de la mise à jour des règles, utilisation des règles existantes"
+# Vérification des permissions sur le répertoire du fichier PID (toujours utile)
+mkdir -p /var/run/suricata
+chown suricata:suricata /var/run/suricata || echo "Impossible de changer le propriétaire de /var/run/suricata"
 
-# Choix du mode de démarrage
+# Mise à jour des règles Suricata (toujours utile)
+echo "Mise à jour des règles Suricata..."
+suricata-update --no-test 2>/dev/null || echo "Erreur lors de la mise à jour des règles, utilisation des règles existantes"
+
+# Choix du mode de démarrage basé sur la variable MODE
 case $MODE in
     "ips")
         echo "Démarrage de Suricata en mode IPS avec NFQ"
-        exec suricata -c $CONFIG_FILE --pidfile /var/run/suricata.pid -q 0 -v "$@"
+        # Utilisation de exec pour remplacer le processus shell par suricata
+        exec suricata -c $CONFIG_FILE --pidfile /var/run/suricata/suricata.pid -q 0 -v "$@"
         ;;
     "ids"|*)
         echo "Démarrage de Suricata en mode IDS"
-        exec suricata -c $CONFIG_FILE --pidfile /var/run/suricata.pid -i $INTERFACE -v "$@"
+        # Utilisation de exec pour remplacer le processus shell par suricata
+        exec suricata -c $CONFIG_FILE --pidfile /var/run/suricata/suricata.pid -i $INTERFACE -v "$@"
         ;;
-esac 
+esac

@@ -8,7 +8,7 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="${SCRIPT_DIR}/suricata-build.conf"
 ENTRYPOINT_FILE="${SCRIPT_DIR}/entrypoint.sh"
-ENTRYPOINT_TEMPLATE="${SCRIPT_DIR}/entrypoint.sh.template"
+# ENTRYPOINT_TEMPLATE="${SCRIPT_DIR}/entrypoint.sh.template" # Plus nécessaire
 
 # Options par défaut
 MODE="ids"
@@ -20,7 +20,7 @@ VOLUME_LOGS="/var/log/suricata"
 VOLUME_CONFIG="/etc/suricata"
 RUN_DETACHED=false
 RUNMODE="auto"
-CUSTOM_ENTRYPOINT=false
+# CUSTOM_ENTRYPOINT=false # Plus nécessaire
 
 # Couleurs pour une meilleure lisibilité
 RED='\033[0;31m'
@@ -75,7 +75,7 @@ VOLUME_LOGS=$VOLUME_LOGS
 VOLUME_CONFIG=$VOLUME_CONFIG
 RUN_DETACHED=$RUN_DETACHED
 RUNMODE=$RUNMODE
-CUSTOM_ENTRYPOINT=$CUSTOM_ENTRYPOINT
+# CUSTOM_ENTRYPOINT=$CUSTOM_ENTRYPOINT # Plus nécessaire
 EOF
 }
 
@@ -218,107 +218,159 @@ ask_no_cache() {
   fi
 }
 
-# Fonction pour personnaliser l'entrypoint
-customize_entrypoint() {
-  print_title "PERSONNALISATION DU SCRIPT ENTRYPOINT"
-  echo "Vous pouvez personnaliser le script d'entrée qui sera exécuté au démarrage du conteneur"
-  
-  ask_question "Personnaliser le script entrypoint.sh? (o/n) [défaut: non]: "
-  read -r response
-  
-  if [[ "$response" =~ ^[oOyY]$ ]]; then
-    CUSTOM_ENTRYPOINT=true
-    
-    # Demander le mode d'exécution (auto, workers, autofp)
-    print_title "MODE D'EXÉCUTION"
-    echo "Modes disponibles:"
-    echo "1) auto - Automatique (par défaut)"
-    echo "2) workers - Un thread par CPU"
-    echo "3) autofp - Flux parallélisés"
-    
-    ask_question "Choisissez le mode d'exécution [1-3, défaut: auto]: "
-    read -r runmode_choice
-    
-    case $runmode_choice in
-      2)
-        RUNMODE="workers"
-        print_info "Mode workers sélectionné"
-        ;;
-      3)
-        RUNMODE="autofp"
-        print_info "Mode autofp sélectionné"
-        ;;
-      *)
-        RUNMODE="auto"
-        print_info "Mode auto sélectionné (par défaut)"
-        ;;
-    esac
-    
-    # Créer l'entrypoint personnalisé
-    print_info "Création du script entrypoint.sh personnalisé"
-    cat > "$ENTRYPOINT_FILE" << EOF
-#!/bin/bash
+# Fonction pour demander le mode d'exécution (Runmode)
+ask_runmode() {
+  print_title "MODE D'EXÉCUTION (RUNMODE)"
+  echo "Définit comment Suricata gère les threads et les paquets."
+  echo "Modes disponibles:"
+  echo "1) auto   - Automatique (par défaut, recommandé pour commencer)"
+  echo "2) workers - Un thread par CPU pour la capture et le traitement"
+  echo "3) autofp  - Mode "Auto Flow Pinned", essaie d'équilibrer les flux sur les threads"
 
-# Script d'entrée pour conteneur Suricata basé sur PPA
-set -e
+  ask_question "Choisissez le mode d'exécution [1-3, défaut: $RUNMODE]: "
+  read -r runmode_choice
 
-# Valeurs par défaut
-INTERFACE=\${INTERFACE:-"$INTERFACE"}
-HOME_NET=\${HOME_NET:-"$HOME_NET"}
-MODE=\${MODE:-"$MODE"}
-RUNMODE=\${RUNMODE:-"$RUNMODE"}
-CONFIG_FILE="/etc/suricata/suricata.yaml"
+  case $runmode_choice in
+    2)
+      RUNMODE="workers"
+      print_info "Mode workers sélectionné"
+      ;;
+    3)
+      RUNMODE="autofp"
+      print_info "Mode autofp sélectionné"
+      ;;
+    *)
+      RUNMODE="auto"
+      print_info "Mode auto sélectionné (par défaut)"
+      ;;
+  esac
+}
 
-echo "Configuration Suricata..."
-echo "Interface: \$INTERFACE"
-echo "HOME_NET: \$HOME_NET"
-echo "Mode: \$MODE"
-echo "Runmode: \$RUNMODE"
+# Nouvelle fonction pour générer suricata.yaml
+generate_suricata_yaml() {
+  local config_path="$VOLUME_CONFIG/suricata.yaml"
+  print_info "Génération du fichier de configuration minimal: $config_path"
 
-# Vérification des paramètres de configuration
-if [ ! -f "\$CONFIG_FILE" ]; then
-    echo "ERREUR: Fichier de configuration \$CONFIG_FILE non trouvé"
-    exit 1
-fi
+  # Créer le répertoire parent si nécessaire
+  mkdir -p "$(dirname "$config_path")"
 
-# Mettre à jour l'interface dans la configuration
-sed -i "s/^  - interface:.*\$/  - interface: \$INTERFACE/" \$CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour l'interface"
+  # Générer le fichier YAML
+  cat > "$config_path" << EOF
+# Fichier suricata.yaml généré par docker-build.sh
 
-# Mettre à jour HOME_NET dans la configuration
-sed -i "s/HOME_NET:.*\$/HOME_NET: \$HOME_NET/" \$CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour HOME_NET"
+# Pourcentage de paquets à traiter avant d'abandonner
+max-pending-packets: 1024
 
-# Mettre à jour le runmode dans la configuration
-sed -i "s/^  runmode:.*\$/  runmode: \$RUNMODE/" \$CONFIG_FILE 2>/dev/null || echo "Impossible de mettre à jour le runmode"
+# Configuration de base des variables
+vars:
+  # Chemin vers les fichiers de règles
+  rule-files:
+    - suricata.rules
 
-# Vérification des permissions sur les répertoires de logs
-if [ ! -w "/var/log/suricata" ]; then
-    echo "Création/correction des permissions du répertoire /var/log/suricata"
-    mkdir -p /var/log/suricata
-    chmod 755 /var/log/suricata
-fi
+  # Variables d'adresses réseau
+  address-groups:
+    # Réseau local principal
+    HOME_NET: "$HOME_NET"
 
-# Mise à jour des règles Suricata
-echo "Mise à jour des règles Suricata..."
-suricata-update 2>/dev/null || echo "Erreur lors de la mise à jour des règles, utilisation des règles existantes"
+    # Serveurs externes (pas HOME_NET)
+    EXTERNAL_NET: "!\$HOME_NET"
 
-# Choix du mode de démarrage
-case \$MODE in
-    "ips")
-        echo "Démarrage de Suricata en mode IPS avec NFQ"
-        exec suricata -c \$CONFIG_FILE --pidfile /var/run/suricata.pid -q 0 -v "\$@"
-        ;;
-    "ids"|*)
-        echo "Démarrage de Suricata en mode IDS"
-        exec suricata -c \$CONFIG_FILE --pidfile /var/run/suricata.pid -i \$INTERFACE -v "\$@"
-        ;;
-esac
+    # Serveurs HTTP
+    HTTP_SERVERS: "\$HOME_NET"
+
+    # Serveurs SMTP
+    SMTP_SERVERS: "\$HOME_NET"
+
+    # Serveurs DNS
+    DNS_SERVERS: "\$HOME_NET"
+
+  # Variables de ports
+  port-groups:
+    # Ports HTTP
+    HTTP_PORTS: "80"
+
+    # Ports SSL/TLS
+    SSL_PORTS: "443"
+
+    # Ports SMTP
+    SMTP_PORTS: "25"
+
+    # Ports DNS
+    DNS_PORTS: "53"
+
+# Répertoire par défaut pour les logs (sera dans le conteneur)
+default-log-dir: /var/log/suricata/
+
+# Paramètres de classification
+classification-file: /etc/suricata/classification.config
+# Référence pour les métadonnées de règles
+reference-config-file: /etc/suricata/reference.config
+
+# Configuration de la capture de paquets (AF_PACKET)
+af-packet:
+  - interface: $INTERFACE
+    # cluster-id: 99 # Commenté par défaut, peut être utile si plusieurs instances
+    # cluster-type: cluster_flow # Recommandé si cluster-id est utilisé
+    # checksum-checks: kernel # Défaut
+    # defrag: yes # Recommandé
+    # use-mmap: yes # Recommandé
+    # tpacket-v3: yes # Recommandé si supporté
+
+# Configuration des threads et du mode d'exécution
+threading:
+  # set-cpu-affinity: yes # Commenté par défaut, activer si nécessaire
+  runmode: $RUNMODE
+
+# Configuration des sorties
+outputs:
+  # Sortie EVE JSON (recommandée)
+  - eve-log:
+      enabled: yes
+      type: file
+      filename: eve.json
+      # Types d'événements à inclure
+      types:
+        - alert
+        - http: {extended: yes} # Infos HTTP étendues
+        - dns
+        - tls: {extended: yes} # Infos TLS étendues
+        - files: {force-magic: yes, force-hash: [md5,sha1,sha256]}
+        - smtp
+        - flow
+        - netflow
+        - stats: {interval: 8} # Stats toutes les 8 secondes
+
+  # Sortie "fast log" (simple, pour les alertes)
+  - fast:
+      enabled: yes
+      filename: fast.log
+
+  # Sortie "unified2" (format binaire, pour Barnyard2 etc.)
+  # - unified2-alert:
+  #     enabled: yes
+  #     filename: unified2.alert
+
+# Actions en cas d'erreur
+# engine-analysis:
+  # rules-fast-pattern: yes
+
+# Option pour exécuter en tant qu'utilisateur non-root après démarrage
+# run-as:
+  # user: suricata
+  # group: suricata
+
+# Chemin vers le fichier PID
+pid-file: /var/run/suricata/suricata.pid
 EOF
-    chmod +x "$ENTRYPOINT_FILE"
-    print_info "Script entrypoint.sh personnalisé créé et configuré"
-  else
-    CUSTOM_ENTRYPOINT=false
-    print_info "Script entrypoint.sh standard sera utilisé"
-  fi
+
+  # Définir des permissions raisonnables pour le fichier généré
+  chmod 644 "$config_path"
+  # Essayer de définir le groupe si possible (peut échouer si l'utilisateur n'a pas les droits sur l'hôte)
+  chgrp suricata "$config_path" 2>/dev/null || true
+
+  # Vérifier explicitement la création du fichier sur l'hôte
+  print_info "Vérification du fichier généré sur l'hôte :"
+  ls -l "$config_path"
 }
 
 # Afficher le titre principal
@@ -332,31 +384,30 @@ echo
 ask_mode
 ask_interface
 ask_home_net
+ask_runmode # Demander le Runmode ici
 ask_docker_tag
 ask_volume_logs
 ask_volume_config
 ask_detached
 ask_no_cache
-customize_entrypoint
 
 # Sauvegarder la configuration mise à jour
 save_config
+
+# Générer le fichier suricata.yaml sur l'hôte avant le build/run
+generate_suricata_yaml
 
 # Afficher le récapitulatif
 print_title "RÉCAPITULATIF DE LA CONFIGURATION"
 print_info "Mode: $MODE"
 print_info "Interface: $INTERFACE"
 print_info "HOME_NET: $HOME_NET"
+print_info "Runmode: $RUNMODE" # Afficher le Runmode
 print_info "Tag Docker: $DOCKER_TAG"
 print_info "Volume logs: $VOLUME_LOGS"
 print_info "Volume config: $VOLUME_CONFIG"
 print_info "Mode détaché: $RUN_DETACHED"
-if [ "$CUSTOM_ENTRYPOINT" = true ]; then
-  print_info "Entrypoint personnalisé: Oui"
-  print_info "Runmode: $RUNMODE"
-else
-  print_info "Entrypoint personnalisé: Non"
-fi
+# Retrait de l'affichage lié à CUSTOM_ENTRYPOINT
 
 # Demander confirmation
 ask_question "Continuer avec ces paramètres? (o/n)"
@@ -366,9 +417,10 @@ if [[ ! "$confirm" =~ ^[oOyY]$ ]]; then
   exit 0
 fi
 
-# Vérifier si le fichier entrypoint.sh existe
+# Vérifier si le fichier entrypoint.sh existe (toujours nécessaire)
 if [ ! -f "$ENTRYPOINT_FILE" ]; then
   print_error "Erreur: Script entrypoint.sh non trouvé dans $ENTRYPOINT_FILE"
+  # On pourrait proposer de le créer à partir d'un template ici si besoin
   exit 1
 fi
 
@@ -378,12 +430,9 @@ print_info "Exécution de la commande de build Docker..."
 
 # Construire l'image Docker
 docker build $BUILD_ARGS \
-  --build-arg MODE="$MODE" \
-  --build-arg INTERFACE="$INTERFACE" \
-  --build-arg HOME_NET="$HOME_NET" \
   -t "$DOCKER_TAG" \
   -f "${ROOT_DIR}/Dockerfile" \
-  "${ROOT_DIR}"
+  "${ROOT_DIR}" # Plus besoin de passer les build-args MODE, INTERFACE, HOME_NET
 
 # Vérifier si la construction a réussi
 if [ $? -eq 0 ]; then
@@ -398,29 +447,25 @@ if [ $? -eq 0 ]; then
   fi
   
   # Générer la commande d'exécution complète
-  DOCKER_RUN_CMD="docker run $DETACHED_FLAG --name suricata --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW"
+  DOCKER_RUN_CMD="docker run $DETACHED_FLAG --name suricata --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW --cap-add=SYS_NICE"
   
   # Ajouter les volumes
   if [ -n "$VOLUME_LOGS" ]; then
+    # Créer le répertoire hôte s'il n'existe pas
+    mkdir -p "$VOLUME_LOGS"
     DOCKER_RUN_CMD="$DOCKER_RUN_CMD -v $VOLUME_LOGS:/var/log/suricata"
   fi
   
   if [ -n "$VOLUME_CONFIG" ]; then
-    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -v $VOLUME_CONFIG:/etc/suricata"
+    # Créer le répertoire hôte s'il n'existe pas
+    mkdir -p "$VOLUME_CONFIG"
+    # Simplifier le chemin (sans / final)
+    host_config_path=$(echo "$VOLUME_CONFIG" | sed 's:/$::')
+    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -v $host_config_path:/etc/suricata"
   fi
   
-  # Ajouter les variables d'environnement
-  DOCKER_RUN_CMD="$DOCKER_RUN_CMD -e INTERFACE=$INTERFACE -e HOME_NET=\"$HOME_NET\""
-  
-  # Ajouter le mode si c'est IPS
-  if [ "$MODE" = "ips" ]; then
-    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -e MODE=ips"
-  fi
-  
-  # Ajouter le runmode si un entrypoint personnalisé a été créé
-  if [ "$CUSTOM_ENTRYPOINT" = true ]; then
-    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -e RUNMODE=$RUNMODE"
-  fi
+  # Ajouter les variables d'environnement (SEULEMENT MODE et INTERFACE maintenant)
+  DOCKER_RUN_CMD="$DOCKER_RUN_CMD -e MODE=$MODE -e INTERFACE=$INTERFACE"
   
   # Ajouter le tag de l'image
   DOCKER_RUN_CMD="$DOCKER_RUN_CMD $DOCKER_TAG"
