@@ -34,14 +34,15 @@ RUN set -a && . /tmp/suricata-build.conf && set +a && \
     fi && \
     # Installation de cbindgen pour Rust si supporté
     if [ "$RUST_SUPPORT" = "true" ]; then \
-        export PATH="$HOME/.cargo/bin:$PATH" && \
+        mkdir -p /root/.cargo/bin && \
+        export PATH="/root/.cargo/bin:$PATH" && \
         cargo install --force cbindgen ; \
     fi
 
 # Clonage et compilation de Suricata
 WORKDIR /opt
 RUN set -a && . /tmp/suricata-build.conf && set +a && \
-    export PATH="$HOME/.cargo/bin:$PATH" && \
+    export PATH="/root/.cargo/bin:$PATH" && \
     git clone https://github.com/OISF/suricata.git && \
     cd suricata && \
     git checkout $BRANCH && \
