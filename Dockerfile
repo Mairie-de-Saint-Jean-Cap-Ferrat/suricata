@@ -17,38 +17,55 @@ RUN apt-get update && \
     pkg-config zlib1g zlib1g-dev libcap-ng-dev libcap-ng0 make \
     libmagic-dev libjansson-dev rustc cargo jq git-core \
     ca-certificates python3-pip python3-yaml curl \
-    ethtool && \
+    ethtool sudo && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Chargement des variables de configuration
+# Chargement des variables de configuration et installation des dépendances IPS
 RUN set -a && . /tmp/suricata-build.conf && set +a && \
-    # Installation des dépendances IPS si nécessaire
     if [ "$IPS_MODE" = "true" ]; then \
+        echo "Installation des dépendances IPS..." && \
         apt-get update && \
         apt-get -y install --no-install-recommends \
         libnetfilter-queue-dev libnetfilter-queue1 \
         libnfnetlink-dev libnfnetlink0 && \
         apt-get clean && \
         rm -rf /var/lib/apt/lists/* ; \
-    fi && \
-    # Installation de cbindgen pour Rust si supporté
-    if [ "$RUST_SUPPORT" = "true" ]; then \
-        mkdir -p /root/.cargo/bin && \
-        export PATH="/root/.cargo/bin:$PATH" && \
-        cargo install --force cbindgen ; \
     fi
 
-# Clonage et compilation de Suricata
+# Installation de cbindgen pour Rust (séparé pour isoler les problèmes)
+RUN set -a && . /tmp/suricata-build.conf && set +a && \
+    if [ "$RUST_SUPPORT" = "true" ]; then \
+        echo "Installation de cbindgen..." && \
+        mkdir -p /root/.cargo/bin && \
+        echo "PATH actuel: $PATH" && \
+        export PATH="/root/.cargo/bin:$PATH" && \
+        echo "PATH après modification: $PATH" && \
+        cargo --version && \
+        rustc --version && \
+        cargo install --force cbindgen || echo "Installation de cbindgen échouée mais on continue" ; \
+    fi
+
+# Clonage du dépôt Suricata
 WORKDIR /opt
 RUN set -a && . /tmp/suricata-build.conf && set +a && \
-    export PATH="/root/.cargo/bin:$PATH" && \
+    echo "Clonage du dépôt Suricata..." && \
     git clone https://github.com/OISF/suricata.git && \
     cd suricata && \
-    git checkout $BRANCH && \
+    git checkout $BRANCH
+
+# Préparation du build
+RUN set -a && . /tmp/suricata-build.conf && set +a && \
+    cd /opt/suricata && \
+    echo "Exécution du script bundle.sh..." && \
     ./scripts/bundle.sh && \
-    ./autogen.sh && \
-    # Configuration avec les options spécifiées
+    echo "Exécution du script autogen.sh..." && \
+    ./autogen.sh
+
+# Configuration et compilation
+RUN set -a && . /tmp/suricata-build.conf && set +a && \
+    cd /opt/suricata && \
+    echo "Configuration de Suricata..." && \
     CONFIGURE_OPTIONS="" && \
     if [ "$IPS_MODE" = "true" ]; then \
         CONFIGURE_OPTIONS="$CONFIGURE_OPTIONS --enable-nfqueue"; \
@@ -56,8 +73,15 @@ RUN set -a && . /tmp/suricata-build.conf && set +a && \
     if [ -n "$EXTRA_CONFIGURE_OPTIONS" ]; then \
         CONFIGURE_OPTIONS="$CONFIGURE_OPTIONS $EXTRA_CONFIGURE_OPTIONS"; \
     fi && \
+    echo "Options de configuration: $CONFIGURE_OPTIONS" && \
     ./configure $CONFIGURE_OPTIONS && \
-    make && \
+    echo "Compilation de Suricata..." && \
+    make -j$(nproc)
+
+# Installation
+RUN set -a && . /tmp/suricata-build.conf && set +a && \
+    cd /opt/suricata && \
+    echo "Installation de Suricata avec: make install-$AUTO_SETUP" && \
     make install-$AUTO_SETUP && \
     ldconfig
 
