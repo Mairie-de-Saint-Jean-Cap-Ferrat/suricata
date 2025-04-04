@@ -4,14 +4,15 @@ FROM python:3.10-slim
 LABEL maintainer="Votre Nom <votre@email.com>"
 LABEL description="Interface Web (Flask + Frontend) pour Suricata"
 
-# Définir le répertoire de travail
+# Définir le répertoire de travail principal
 WORKDIR /app
 
 # Copier d'abord le fichier requirements.txt pour profiter du cache Docker
-COPY web/api/requirements.txt /app/api/
+# Il est maintenant à la racine du dossier web
+COPY web/requirements.txt /app/
 
 # Installer les dépendances Python
-RUN pip install --no-cache-dir -r /app/api/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copier tout le contenu du dossier web (frontend et backend)
 COPY web/ /app/web/
@@ -22,6 +23,6 @@ WORKDIR /app/web
 # Exposer le port sur lequel Flask écoute
 EXPOSE 5001
 
-# Définir la commande pour lancer l'application Flask
+# Définir la commande pour lancer l'application Flask (app.py est maintenant ici)
 # Utiliser gunicorn ou waitress serait mieux en production
-CMD ["python", "api/app.py"]
+CMD ["python", "app.py"]

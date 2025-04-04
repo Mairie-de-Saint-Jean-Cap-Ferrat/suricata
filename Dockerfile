@@ -55,8 +55,7 @@ RUN mkdir -p /var/log/suricata /var/lib/suricata /etc/suricata /var/run/suricata
 # Le fichier doit exister sur l'hôte dans ./docker/run/etc/suricata.yaml au moment du build
 COPY ./docker/run/etc/suricata.yaml /etc/suricata/suricata.yaml
 # Copier également les fichiers de configuration essentiels installés par le PPA
-COPY /etc/suricata/classification.config /etc/suricata/classification.config
-COPY /etc/suricata/reference.config /etc/suricata/reference.config
+COPY ./etc /etc/suricata
 
 # S'assurer des bonnes permissions DANS l'image
 RUN chown suricata:suricata /etc/suricata/suricata.yaml \
