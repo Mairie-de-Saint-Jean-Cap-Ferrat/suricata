@@ -1,7 +1,7 @@
 # Utiliser une image Python légère
 FROM python:3.10-slim
 
-LABEL maintainer="Votre Nom <votre@email.com>"
+LABEL maintainer="y0n1x <contact@maytech.fr>"
 LABEL description="Interface Web (Flask + Frontend) pour Suricata"
 
 # Définir le répertoire de travail principal

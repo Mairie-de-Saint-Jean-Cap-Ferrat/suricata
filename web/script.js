@@ -1,7 +1,13 @@
 document.addEventListener('DOMContentLoaded', () => {
     const logContent = document.getElementById('log-content');
-    const refreshButton = document.getElementById('refresh-log');
-    const statusMessage = document.getElementById('status-message'); // Get status element
+    const refreshLogButton = document.getElementById('refresh-log');
+    const refreshChartsButton = document.getElementById('refresh-charts');
+    const statusMessage = document.getElementById('status-message');
+    const commandStatusDiv = document.getElementById('command-status');
+    const enableConfTextarea = document.getElementById('enable-conf-content');
+    const disableConfTextarea = document.getElementById('disable-conf-content');
+    const saveConfigButton = document.getElementById('save-config-btn');
+    const configStatusMessage = document.getElementById('config-status-message');
 
     const fetchLogs = async () => {
         logContent.textContent = 'Chargement des logs...';
@@ -34,8 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    if (refreshButton) {
-        refreshButton.addEventListener('click', fetchLogs);
+    if (refreshLogButton) {
+        refreshLogButton.addEventListener('click', fetchLogs);
     }
 
     // Initial load
@@ -44,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Backend API Interaction --- 
     const sendCommandToBackend = async (command, args = null) => {
         statusMessage.textContent = `Envoi de la commande ${command}...`;
+        commandStatusDiv.className = 'alert alert-info mt-3';
         const payload = { command: command };
         if (args) {
             payload.arguments = args;
@@ -63,15 +70,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json(); // Always expect JSON back from our Flask API
 
             if (!response.ok || result.return === 'FAILED') {
-                 // Use message from backend if available
+                commandStatusDiv.className = 'alert alert-danger mt-3';
                 throw new Error(result.message || `Erreur HTTP! status: ${response.status}`);
             }
             
+            commandStatusDiv.className = 'alert alert-success mt-3';
             // Display success and the message from Suricata's response
-            statusMessage.textContent = `Commande ${command} réussie: ${JSON.stringify(result.message || result)}`; // Show the actual response message
+            statusMessage.textContent = `Commande ${command} réussie: ${JSON.stringify(result.message || result)}`;
             console.log("Backend response:", result);
 
         } catch (error) {
+            commandStatusDiv.className = 'alert alert-danger mt-3';
             console.error(`Erreur lors de l'envoi de la commande ${command}:`, error);
             statusMessage.textContent = `Erreur commande ${command}: ${error.message}`;
         }
@@ -193,6 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const fetchTopAlertsChartData = async () => {
+        console.log('Fetching chart data...'); // Debug log
         try {
             const response = await fetch('/api/stats/top_signatures');
             if (!response.ok) {
@@ -231,13 +241,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // --- Event Listeners --- 
+    if (refreshLogButton) {
+        refreshLogButton.addEventListener('click', fetchLogs);
+    }
+
+    if (refreshChartsButton) {
+        refreshChartsButton.addEventListener('click', fetchTopAlertsChartData);
+    }
+
     // --- Initial Load --- 
     fetchLogs(); // Load text logs
     fetchTopAlertsChartData(); // Load chart data
+    fetchConfigFile('enable.conf', enableConfTextarea);
+    fetchConfigFile('disable.conf', disableConfTextarea);
 
     // Link chart refresh to log refresh?
-    if (refreshButton) {
-        refreshButton.addEventListener('click', () => {
+    if (refreshLogButton) {
+        refreshLogButton.addEventListener('click', () => {
             fetchLogs(); // Refresh text logs
             fetchTopAlertsChartData(); // Refresh chart data as well
         });
@@ -245,5 +266,79 @@ document.addEventListener('DOMContentLoaded', () => {
          // If no refresh button, ensure initial load still happens
          fetchLogs();
          fetchTopAlertsChartData();
+    }
+
+    // --- NOUVEAU: Config File Fetching & Saving ---
+    const fetchConfigFile = async (filename, textareaElement) => {
+        console.log(`Fetching ${filename}...`);
+        try {
+            const response = await fetch(`/api/config/${filename}`);
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Erreur HTTP! status: ${response.status}`);
+            }
+            const data = await response.json();
+            textareaElement.value = data.content;
+            console.log(`${filename} loaded successfully.`);
+        } catch (error) {
+            console.error(`Erreur lors du chargement de ${filename}:`, error);
+            textareaElement.value = `Erreur chargement: ${error.message}`;
+            textareaElement.classList.add('is-invalid'); // Indicate error visually
+            configStatusMessage.textContent = `Erreur chargement ${filename}.`;
+            configStatusMessage.className = 'ms-3 text-danger';
+        }
+    };
+
+    const saveConfigFile = async (filename, textareaElement) => {
+        const content = textareaElement.value;
+        console.log(`Saving ${filename}...`);
+        configStatusMessage.textContent = `Sauvegarde de ${filename}...`;
+        configStatusMessage.className = 'ms-3 text-info';
+
+        try {
+            const response = await fetch(`/api/config/${filename}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ content: content })
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                 throw new Error(result.error || `Erreur HTTP! status: ${response.status}`);
+            }
+            console.log(`${filename} saved successfully.`);
+            textareaElement.classList.remove('is-invalid');
+            // Retour implicite au message global de succès après les deux sauvegardes
+            return true; // Indicate success
+        } catch (error) {
+            console.error(`Erreur lors de la sauvegarde de ${filename}:`, error);
+            configStatusMessage.textContent = `Erreur sauvegarde ${filename}: ${error.message}`;
+            configStatusMessage.className = 'ms-3 text-danger';
+            textareaElement.classList.add('is-invalid');
+            return false; // Indicate failure
+        }
+    };
+
+    // AJOUT: Event listener pour le bouton de sauvegarde de la config
+    if (saveConfigButton) {
+        saveConfigButton.addEventListener('click', async () => {
+            configStatusMessage.textContent = 'Sauvegarde en cours...';
+            configStatusMessage.className = 'ms-3 text-info';
+            saveConfigButton.disabled = true; // Disable button during save
+
+            // Sauvegarder les deux fichiers
+            const enableSuccess = await saveConfigFile('enable.conf', enableConfTextarea);
+            const disableSuccess = await saveConfigFile('disable.conf', disableConfTextarea);
+
+            if (enableSuccess && disableSuccess) {
+                 configStatusMessage.textContent = 'Configuration sauvegardée avec succès. N\'oubliez pas d\'exécuter suricata-update et de recharger les règles.';
+                 configStatusMessage.className = 'ms-3 text-success';
+            } else {
+                 // Error message is already set by saveConfigFile on failure
+                 configStatusMessage.className = 'ms-3 text-danger'; // Ensure it's red
+            }
+            saveConfigButton.disabled = false; // Re-enable button
+        });
     }
 }); 

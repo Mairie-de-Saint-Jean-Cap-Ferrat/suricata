@@ -4,68 +4,156 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Suricata Control Interface</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Custom CSS (peut être chargé après Bootstrap pour surcharger) -->
     <link rel="stylesheet" href="style.css">
     <style>
-        /* Ajout pour contraindre la taille du graphique */
+        /* Specific chart box constraints remain relevant */
         .chart-box {
-            position: relative; /* Nécessaire pour que Chart.js gère correctement la taille */
-            height: 400px; /* Hauteur fixe pour le conteneur */
-            width: 90%; /* Largeur relative */
-            margin: 20px auto; /* Centrer et espacer */
+            position: relative;
+            min-height: 400px; /* Utiliser min-height pour flexibilité */
+            width: 100%; /* Prendra la largeur de la colonne Bootstrap */
+            margin-bottom: 20px; /* Espacement sous le graphique */
         }
         #topAlertsChart {
-             max-height: 100%; /* Assurer que le canvas ne dépasse pas le conteneur */
+            max-height: 400px; /* Limite la hauteur du canvas */
+            width: 100% !important; /* Force la largeur */
         }
-        /* Optionnel: améliorer l'apparence des logs */
         #log-content {
             max-height: 500px;
             overflow-y: auto;
-            background-color: #f5f5f5;
-            border: 1px solid #ccc;
-            padding: 10px;
-            white-space: pre-wrap; /* Retour à la ligne pour les longs logs */
+            background-color: #f8f9fa; /* Couleur Bootstrap pour fond léger */
+            border: 1px solid #dee2e6; /* Bordure Bootstrap */
+            padding: 1rem; /* Padding Bootstrap */
+            font-family: var(--bs-font-monospace); /* Utiliser la police mono de Bootstrap */
+            font-size: 0.9em;
+            white-space: pre-wrap;
             word-wrap: break-word;
         }
     </style>
 </head>
 <body>
-    <h1>Interface de Contrôle Suricata</h1>
+    <div class="container mt-4">
+        <header class="d-flex justify-content-between align-items-center mb-4 p-3 bg-light rounded">
+            <h1 class="h3">Interface de Contrôle Suricata</h1>
+            <!-- Peut-être ajouter un indicateur de statut global ici -->
+        </header>
 
-    <div id="controls">
-        <h2>Contrôles Suricata (via Backend API)</h2>
-        <!-- <button id="start-btn">Start Suricata (Not Implemented)</button> -->
-        <button id="reload-btn">Recharger les Règles</button>
-        <button id="shutdown-btn">Arrêter Suricata</button>
-        <button id="uptime-btn">Uptime</button>
-        <button id="iface-list-btn">Lister Interfaces</button>
-        <!-- Add more buttons for other commands as needed -->
-         <p>
-             <em>Note: L'arrêt de Suricata via ce bouton peut nécessiter un redémarrage manuel du service. Le démarrage n'est pas supporté via cette interface.</em>
-         </p>
-         <div id="command-status">
-            <p>Statut de la dernière commande : <span id="status-message">Prêt</span></p>
-         </div>
-    </div>
+        <div class="row">
+            <!-- Colonne pour les Contrôles -->
+            <div class="col-md-4 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        Contrôles Suricata
+                    </div>
+                    <div class="card-body" id="controls">
+                        <p class="card-text small text-muted">Envoyer des commandes via l'API backend.</p>
+                        <div class="d-grid gap-2 mb-3">
+                             <button id="reload-btn" class="btn btn-primary">Recharger les Règles</button>
+                             <button id="uptime-btn" class="btn btn-info">Uptime</button>
+                             <button id="iface-list-btn" class="btn btn-secondary">Lister Interfaces</button>
+                             <button id="shutdown-btn" class="btn btn-danger">Arrêter Suricata</button>
+                        </div>
+                        <p class="small text-warning">
+                             <em>Note: L'arrêt via ce bouton peut nécessiter un redémarrage manuel du service.</em>
+                        </p>
+                        <div id="command-status" class="alert alert-info mt-3" role="alert">
+                            Statut : <span id="status-message">Prêt</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-    <h2>Statistiques Visuelles</h2>
-    <div id="charts-container">
-        <div class="chart-box">
-            <h3>Top 10 Signatures d'Alerte</h3>
-            <canvas id="topAlertsChart"></canvas>
+            <!-- Colonne pour les Graphiques -->
+            <div class="col-md-8 mb-4">
+                 <div class="card">
+                     <div class="card-header">
+                         Statistiques Visuelles
+                     </div>
+                     <div class="card-body" id="charts-container">
+                         <div class="chart-box">
+                             <h5 class="card-title">Top 10 Signatures d'Alerte</h5>
+                             <canvas id="topAlertsChart"></canvas>
+                         </div>
+                         <!-- D'autres graphiques ici -->
+                     </div>
+                     <div class="card-footer text-end">
+                         <button id="refresh-charts" class="btn btn-sm btn-outline-secondary">Rafraîchir Graphiques</button>
+                     </div>
+                 </div>
+            </div>
         </div>
-        <!-- D'autres graphiques peuvent être ajoutés ici -->
+
+        <!-- AJOUT: Section Configuration des Règles -->
+        <div class="row">
+            <div class="col-12 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        Configuration des Règles (enable.conf / disable.conf)
+                    </div>
+                    <div class="card-body">
+                         <p class="card-text small text-muted">
+                             Modifiez les fichiers pour activer/désactiver des règles spécifiques par SID, groupe ou regex.
+                             Voir la <a href="https://docs.suricata.io/en/latest/rule-management/suricata-update.html#controlling-which-rules-are-used" target="_blank" rel="noopener noreferrer">documentation Suricata-Update</a> pour la syntaxe.
+                         </p>
+                         <div class="alert alert-warning small" role="alert">
+                            <strong>Important:</strong> Après avoir sauvegardé, vous devez exécuter 
+                            <code>docker compose exec suricata suricata-update</code> dans votre terminal, puis cliquer sur "Recharger les Règles" ci-dessus pour appliquer les changements.
+                         </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="enable-conf-content" class="form-label"><code>enable.conf</code> (Activer des règles)</label>
+                                <textarea class="form-control" id="enable-conf-content" rows="10" placeholder="Exemple:
+2019401
+group:emerging-icmp.rules
+re:trojan"></textarea>
+                                <div class="form-text">Activer des signatures spécifiques, des groupes ou via regex.</div>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="disable-conf-content" class="form-label"><code>disable.conf</code> (Désactiver des règles)</label>
+                                <textarea class="form-control" id="disable-conf-content" rows="10" placeholder="Exemple:
+2019401
+group:emerging-info.rules
+re:heartbleed"></textarea>
+                                <div class="form-text">Désactiver des signatures spécifiques, des groupes ou via regex.</div>
+                            </div>
+                        </div>
+                        <button id="save-config-btn" class="btn btn-success">Sauvegarder les Modifications</button>
+                         <span id="config-status-message" class="ms-3 text-muted"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section Logs -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        Visualisation des Logs (eve.json / suricata.log)
+                        <button id="refresh-log" class="btn btn-sm btn-outline-primary">Rafraîchir Logs</button>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text small text-muted">Contenu des fichiers logs montés (rafraîchissement manuel).</p>
+                        <div id="log-container">
+                             <pre id="log-content">Chargement des logs...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="text-center text-muted mt-5 mb-3">
+            Suricata Interface - 2025
+        </footer>
     </div>
 
-    <h2>Visualisation des Logs Suricata (Statique)</h2>
-    <p>Ceci affiche le contenu des fichiers <code>eve.json</code> ou <code>suricata.log</code> s'ils sont présents dans un sous-dossier <code>/logs/</code> relatif à cette page et servis par le serveur web.</p>
-    <div id="log-controls">
-        <button id="refresh-log">Rafraîchir les Logs</button>
-    </div>
-    <div id="log-container">
-        <pre id="log-content">Chargement des logs...</pre>
-    </div>
-
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Custom Script -->
     <script src="script.js"></script>
 </body>
 </html> 

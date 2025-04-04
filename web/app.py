@@ -12,6 +12,8 @@ from flask import Flask, request, jsonify, send_from_directory
 STATIC_FOLDER_PATH = '.' # Serve from the current working directory (/app/web)
 LOGS_FOLDER_PATH = 'logs' # Where logs will be mounted/available
 EVE_JSON_FILE = 'eve.json' # Nom du fichier log principal
+# AJOUT: Chemin vers le répertoire de configuration monté
+SURICATA_CONFIG_DIR = '/etc/suricata'
 
 app = Flask(__name__, static_folder=STATIC_FOLDER_PATH, static_url_path='')
 
@@ -140,6 +142,71 @@ def handle_command():
     else:
         # Return the error message from our helper function
         return jsonify({"return": "FAILED", "message": result['message']}), 500
+
+# --- NOUVEAUX ENDPOINTS POUR LA CONFIGURATION DES RÈGLES ---
+
+def read_config_file(filename):
+    """Helper function to read a config file."""
+    filepath = os.path.join(SURICATA_CONFIG_DIR, filename)
+    logger.info(f"Attempting to read config file: {filepath}")
+    if not os.path.exists(filepath):
+        logger.warning(f"Config file not found: {filepath}. Returning empty content.")
+        # Il est normal que ces fichiers n'existent pas initialement
+        return "" 
+    try:
+        with open(filepath, 'r') as f:
+            content = f.read()
+        logger.info(f"Successfully read config file: {filepath}")
+        return content
+    except Exception as e:
+        logger.error(f"Error reading config file {filepath}: {e}")
+        raise # Re-raise the exception to be caught by the endpoint
+
+def write_config_file(filename, content):
+    """Helper function to write to a config file."""
+    filepath = os.path.join(SURICATA_CONFIG_DIR, filename)
+    logger.info(f"Attempting to write config file: {filepath}")
+    try:
+        # Ensure the directory exists (should be mounted by Docker, but good practice)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, 'w') as f:
+            f.write(content)
+        logger.info(f"Successfully wrote config file: {filepath}")
+    except Exception as e:
+        logger.error(f"Error writing config file {filepath}: {e}")
+        raise
+
+@app.route('/api/config/<filename>', methods=['GET'])
+def get_config_file(filename):
+    """Get the content of enable.conf or disable.conf."""
+    if filename not in ('enable.conf', 'disable.conf'):
+        return jsonify({"error": "Invalid config filename specified."}), 400
+    try:
+        content = read_config_file(filename)
+        return jsonify({"filename": filename, "content": content})
+    except Exception as e:
+        return jsonify({"error": f"Failed to read {filename}: {e}"}), 500
+
+@app.route('/api/config/<filename>', methods=['POST'])
+def save_config_file(filename):
+    """Save content to enable.conf or disable.conf."""
+    if filename not in ('enable.conf', 'disable.conf'):
+        return jsonify({"error": "Invalid config filename specified."}), 400
+    
+    data = request.get_json()
+    if data is None or 'content' not in data:
+        return jsonify({"error": "Invalid request. 'content' field missing."}), 400
+
+    content = data['content']
+    # Basic sanity check (optional): ensure content is string
+    if not isinstance(content, str):
+         return jsonify({"error": "Invalid content format, must be a string."}), 400
+
+    try:
+        write_config_file(filename, content)
+        return jsonify({"status": "success", "message": f"{filename} saved successfully."})
+    except Exception as e:
+        return jsonify({"error": f"Failed to save {filename}: {e}"}), 500
 
 # --- NOUVEL ENDPOINT POUR LES STATISTIQUES ---
 @app.route('/api/stats/top_signatures', methods=['GET'])

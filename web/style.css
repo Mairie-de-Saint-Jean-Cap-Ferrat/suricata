@@ -1,31 +1,58 @@
 body {
-    font-family: sans-serif;
-    margin: 20px;
-    background-color: #f4f4f4;
+    /* background-color: #f4f4f4; Bootstrap gère le fond via .container ou body */
+    /* font-family est géré par Bootstrap, sauf si on veut spécifiquement autre chose */
+    /* margin: 20px; Géré par les conteneurs Bootstrap */
 }
 
-h1 {
+/* Les styles pour h1 sont maintenant gérés par Bootstrap (.h3 dans l'HTML) */
+/* h1 {
     color: #333;
-}
+} */
 
-#log-container {
+/* Les styles spécifiques aux logs sont déplacés dans <style> de index.html */
+/* #log-container {
     background-color: #fff;
     border: 1px solid #ccc;
     padding: 15px;
     margin-top: 20px;
-    height: 60vh; /* Adjust height as needed */
-    overflow-y: scroll; /* Enable vertical scrolling */
-    white-space: pre-wrap; /* Preserve whitespace and wrap lines */
+    height: 60vh; 
+    overflow-y: scroll; 
+    white-space: pre-wrap; 
     font-family: monospace;
     font-size: 0.9em;
-}
+} */
 
-#controls button, #log-controls button {
+/* Les styles de boutons sont maintenant gérés par les classes .btn de Bootstrap */
+/* #controls button, #log-controls button {
     margin: 5px;
     padding: 10px 15px;
     cursor: pointer;
+} */
+
+/* pre peut garder sa marge à 0 si nécessaire, bien que les styles soient dans <style> maintenant */
+/* pre {
+    margin: 0;
+} */
+
+/* Ajout de styles spécifiques si nécessaire pour peaufiner l'intégration */
+
+.card {
+    margin-bottom: 1.5rem; /* Ajouter un peu d'espace sous les cartes */
 }
 
-pre {
-    margin: 0;
+/* Assurer que le canvas reste dans les limites de sa div parente */
+canvas {
+    max-width: 100%;
+    height: auto !important; /* Laisser Chart.js gérer la hauteur avec maintainAspectRatio:false */
+}
+
+/* Style pour le footer */
+footer {
+    padding: 1rem 0;
+    border-top: 1px solid #dee2e6; /* Ligne de séparation Bootstrap */
+}
+
+/* Ajustement potentiel pour l'alerte de statut si nécessaire */
+#command-status {
+     word-break: break-word; /* Pour éviter que les longs messages ne dépassent */
 } 
