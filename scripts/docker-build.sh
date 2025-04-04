@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script helper interactif pour construire l'image Docker de Suricata
+# Script helper interactif pour construire et lancer les services Suricata via Docker Compose
 
 set -e
 
@@ -8,19 +8,17 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="${SCRIPT_DIR}/suricata-build.conf"
 ENTRYPOINT_FILE="${SCRIPT_DIR}/entrypoint.sh"
-# ENTRYPOINT_TEMPLATE="${SCRIPT_DIR}/entrypoint.sh.template" # Plus nécessaire
+# Chemin où générer suricata.yaml sur l'hôte
+SURICATA_YAML_HOST_PATH="${ROOT_DIR}/docker/run/etc/suricata.yaml"
+DOCKER_COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 
 # Options par défaut
 MODE="ids"
 INTERFACE="eth0"
 HOME_NET="[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
-DOCKER_TAG="suricata:latest"
-BUILD_ARGS=""
-VOLUME_LOGS="/var/log/suricata"
-VOLUME_CONFIG="/etc/suricata"
+BUILD_NO_CACHE=false
 RUN_DETACHED=false
 RUNMODE="auto"
-# CUSTOM_ENTRYPOINT=false # Plus nécessaire
 
 # Couleurs pour une meilleure lisibilité
 RED='\033[0;31m'
@@ -60,6 +58,8 @@ load_config() {
   if [ -f "$CONFIG_FILE" ]; then
     print_info "Chargement de la configuration depuis $CONFIG_FILE"
     source "$CONFIG_FILE"
+    # Assurer la compatibilité si l'ancien config existe
+    BUILD_NO_CACHE=${BUILD_NO_CACHE:-false}
   fi
 }
 
@@ -70,18 +70,19 @@ save_config() {
 MODE=$MODE
 INTERFACE=$INTERFACE
 HOME_NET=$HOME_NET
-DOCKER_TAG=$DOCKER_TAG
-VOLUME_LOGS=$VOLUME_LOGS
-VOLUME_CONFIG=$VOLUME_CONFIG
 RUN_DETACHED=$RUN_DETACHED
 RUNMODE=$RUNMODE
-# CUSTOM_ENTRYPOINT=$CUSTOM_ENTRYPOINT # Plus nécessaire
+BUILD_NO_CACHE=$BUILD_NO_CACHE
 EOF
 }
 
-# Vérifier que Docker est installé
+# Vérifier que Docker et docker-compose sont installés
 if ! command -v docker &> /dev/null; then
   print_error "Erreur: Docker n'est pas installé ou n'est pas dans le PATH"
+  exit 1
+fi
+if ! command -v docker-compose &> /dev/null; then
+  print_error "Erreur: docker-compose n'est pas installé ou n'est pas dans le PATH"
   exit 1
 fi
 
@@ -90,7 +91,7 @@ load_config
 
 # Fonction pour demander le mode (IDS/IPS)
 ask_mode() {
-  print_title "MODE DE FONCTIONNEMENT"
+  print_title "MODE DE FONCTIONNEMENT (pour entrypoint.sh)"
   echo "Modes disponibles:"
   echo "1) IDS - Détection d'intrusion uniquement (par défaut)"
   echo "2) IPS - Prévention d'intrusion (bloque les attaques)"
@@ -112,25 +113,26 @@ ask_mode() {
 
 # Fonction pour demander l'interface réseau
 ask_interface() {
-  print_title "INTERFACE RÉSEAU"
-  echo "Interfaces réseau disponibles:"
+  print_title "INTERFACE RÉSEAU (pour entrypoint.sh)"
+  echo "Interfaces réseau disponibles sur l'hôte (pour info):"
   
-  # Lister les interfaces réseau disponibles
+  # Lister les interfaces réseau disponibles sur l'hôte
   available_interfaces=$(ip -o link show | grep -v "lo:" | awk -F': ' '{print $2}')
   echo "$available_interfaces"
   
-  ask_question "Entrez l'interface réseau à surveiller [défaut: $INTERFACE]: "
+  ask_question "Entrez l'interface réseau à surveiller par Suricata DANS le conteneur [défaut: $INTERFACE]: "
   read -r input_interface
   
   if [ -n "$input_interface" ]; then
     INTERFACE="$input_interface"
   fi
-  print_info "Interface sélectionnée: $INTERFACE"
+  print_info "Interface sélectionnée pour Suricata: $INTERFACE"
+  print_warning "Assurez-vous que cette interface est accessible avec network_mode: host"
 }
 
 # Fonction pour demander HOME_NET
 ask_home_net() {
-  print_title "RÉSEAU HOME_NET"
+  print_title "RÉSEAU HOME_NET (pour suricata.yaml)"
   echo "HOME_NET définit les réseaux considérés comme votre réseau interne."
   echo "Format: [192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
   
@@ -143,84 +145,9 @@ ask_home_net() {
   print_info "HOME_NET configuré: $HOME_NET"
 }
 
-# Fonction pour demander le tag Docker
-ask_docker_tag() {
-  print_title "TAG DOCKER"
-  echo "Le tag permet d'identifier votre image Docker (ex: suricata:ips, suricata:latest)"
-  
-  ask_question "Entrez le tag pour l'image Docker [défaut: $DOCKER_TAG]: "
-  read -r input_tag
-  
-  if [ -n "$input_tag" ]; then
-    DOCKER_TAG="$input_tag"
-  fi
-  print_info "Tag Docker: $DOCKER_TAG"
-}
-
-# Fonction pour demander le chemin du volume de logs
-ask_volume_logs() {
-  print_title "VOLUME DE LOGS"
-  echo "Chemin sur l'hôte où les logs de Suricata seront stockés"
-  
-  ask_question "Entrez le chemin pour les logs [défaut: $VOLUME_LOGS]: "
-  read -r input_volume_logs
-  
-  if [ -n "$input_volume_logs" ]; then
-    VOLUME_LOGS="$input_volume_logs"
-  fi
-  print_info "Volume logs: $VOLUME_LOGS"
-}
-
-# Fonction pour demander le chemin du volume de configuration
-ask_volume_config() {
-  print_title "VOLUME DE CONFIGURATION"
-  echo "Chemin sur l'hôte où la configuration de Suricata sera stockée"
-  
-  ask_question "Entrez le chemin pour la configuration [défaut: $VOLUME_CONFIG]: "
-  read -r input_volume_config
-  
-  if [ -n "$input_volume_config" ]; then
-    VOLUME_CONFIG="$input_volume_config"
-  fi
-  print_info "Volume configuration: $VOLUME_CONFIG"
-}
-
-# Fonction pour demander si le conteneur doit tourner en mode détaché
-ask_detached() {
-  print_title "MODE DÉTACHÉ"
-  echo "Le mode détaché permet d'exécuter le conteneur en arrière-plan"
-  
-  ask_question "Exécuter en mode détaché? (o/n) [défaut: non]: "
-  read -r response
-  
-  if [[ "$response" =~ ^[oOyY]$ ]]; then
-    RUN_DETACHED=true
-    print_info "Mode détaché activé"
-  else
-    RUN_DETACHED=false
-    print_info "Mode détaché désactivé (par défaut)"
-  fi
-}
-
-# Fonction pour demander si le cache Docker doit être utilisé
-ask_no_cache() {
-  print_title "UTILISATION DU CACHE"
-  echo "Désactiver le cache permet d'obtenir les versions les plus récentes des paquets"
-  
-  ask_question "Désactiver le cache Docker? (o/n) [défaut: non]: "
-  read -r response
-  
-  if [[ "$response" =~ ^[oOyY]$ ]]; then
-    BUILD_ARGS="$BUILD_ARGS --no-cache"
-    print_info "Cache Docker désactivé"
-  else
-    print_info "Cache Docker activé (par défaut)"
-  fi
-}
-
 # Fonction pour demander le mode d'exécution (Runmode)
 ask_runmode() {
-  print_title "MODE D'EXÉCUTION (RUNMODE)"
+  print_title "MODE D'EXÉCUTION (RUNMODE pour suricata.yaml)"
   echo "Définit comment Suricata gère les threads et les paquets."
   echo "Modes disponibles:"
   echo "1) auto   - Automatique (par défaut, recommandé pour commencer)"
@@ -246,26 +173,61 @@ ask_runmode() {
   esac
 }
 
-# Nouvelle fonction pour générer suricata.yaml
-generate_suricata_yaml() {
-  local config_path="$VOLUME_CONFIG/suricata.yaml"
-  print_info "Génération du fichier de configuration minimal: $config_path"
+# Fonction pour demander si le conteneur doit tourner en mode détaché
+ask_detached() {
+  print_title "MODE DÉTACHÉ (pour docker-compose up)"
+  echo "Le mode détaché permet d'exécuter les conteneurs en arrière-plan"
+  
+  ask_question "Exécuter en mode détaché? (o/n) [défaut: $(if $RUN_DETACHED; then echo oui; else echo non; fi)]: "
+  read -r response
+  
+  if [[ "$response" =~ ^[oOyY]$ ]]; then
+    RUN_DETACHED=true
+    print_info "Mode détaché activé"
+  else
+    RUN_DETACHED=false
+    print_info "Mode détaché désactivé"
+  fi
+}
 
-  # Créer le répertoire parent si nécessaire
+# Fonction pour demander si le cache Docker doit être utilisé pour le build
+ask_no_cache() {
+  print_title "UTILISATION DU CACHE (pour docker-compose build)"
+  echo "Désactiver le cache force la reconstruction de toutes les étapes"
+  
+  ask_question "Désactiver le cache Docker pendant le build? (o/n) [défaut: $(if $BUILD_NO_CACHE; then echo oui; else echo non; fi)]: "
+  read -r response
+  
+  if [[ "$response" =~ ^[oOyY]$ ]]; then
+    BUILD_NO_CACHE=true
+    print_info "Cache Docker désactivé pour le build"
+  else
+    BUILD_NO_CACHE=false
+    print_info "Cache Docker activé pour le build (par défaut)"
+  fi
+}
+
+# Fonction pour générer suricata.yaml sur l'hôte
+generate_suricata_yaml() {
+  local config_path="$SURICATA_YAML_HOST_PATH"
+  print_info "Génération du fichier de configuration sur l'hôte: $config_path"
+
+  # Créer le répertoire parent si nécessaire (normalement docker/run/etc/)
   mkdir -p "$(dirname "$config_path")"
 
   # Générer le fichier YAML
   cat > "$config_path" << EOF
 # Fichier suricata.yaml généré par docker-build.sh
+# Ce fichier sera monté en lecture seule dans le conteneur suricata.
 
 # Pourcentage de paquets à traiter avant d'abandonner
 max-pending-packets: 1024
 
 # Configuration de base des variables
 vars:
-  # Chemin vers les fichiers de règles
+  # Chemin vers les fichiers de règles (relatif à /etc/suricata/ dans le conteneur)
   rule-files:
-    - suricata.rules
+    - rules/suricata.rules # Assurez-vous que ce fichier existe dans le volume suricata-rules ou l'image
 
   # Variables d'adresses réseau
   address-groups:
@@ -298,52 +260,66 @@ vars:
     # Ports DNS
     DNS_PORTS: "53"
 
-# Répertoire par défaut pour les logs (sera dans le conteneur)
+# Répertoire par défaut pour les logs (dans le conteneur)
 default-log-dir: /var/log/suricata/
 
-# Paramètres de classification
+# Paramètres de classification (relatif à /etc/suricata/ dans le conteneur)
 classification-file: /etc/suricata/classification.config
-# Référence pour les métadonnées de règles
 reference-config-file: /etc/suricata/reference.config
 
-# Configuration de la capture de paquets (AF_PACKET)
-af-packet:
-  - interface: $INTERFACE
-    # cluster-id: 99 # Commenté par défaut, peut être utile si plusieurs instances
-    # cluster-type: cluster_flow # Recommandé si cluster-id est utilisé
-    # checksum-checks: kernel # Défaut
-    # defrag: yes # Recommandé
-    # use-mmap: yes # Recommandé
-    # tpacket-v3: yes # Recommandé si supporté
+# Configuration de la capture de paquets (AF_PACKET) - L'interface est définie par la variable d'env $INTERFACE
+# af-packet: # Cette section sera gérée dynamiquement par entrypoint.sh si besoin
+#   - interface: default
 
 # Configuration des threads et du mode d'exécution
 threading:
   # set-cpu-affinity: yes # Commenté par défaut, activer si nécessaire
   runmode: $RUNMODE
 
+# Activer le socket Unix pour l'API
+unix-command:
+  enabled: yes
+  filename: suricata-command.socket # Sera créé dans /var/run/suricata/ grâce au volume
+
+# Chemin vers le fichier PID
+pid-file: /var/run/suricata/suricata.pid # Sera créé dans /var/run/suricata/ grâce au volume
+
 # Configuration des sorties
 outputs:
-  # Sortie EVE JSON (recommandée)
+  # Sortie EVE JSON (recommandée pour l'interface web ou autre traitement)
   - eve-log:
       enabled: yes
       type: file
       filename: eve.json
       # Types d'événements à inclure
       types:
-        - alert
-        - http: {extended: yes} # Infos HTTP étendues
+        - alert: {payload: yes, payload-buffer-size: 4kb, payload-printable: yes}
+        - http: {extended: yes}
         - dns
-        - tls: {extended: yes} # Infos TLS étendues
+        - tls: {extended: yes}
         - files: {force-magic: yes, force-hash: [md5,sha1,sha256]}
         - smtp
         - flow
         - netflow
         - stats: {interval: 8} # Stats toutes les 8 secondes
+        - anomaly # Inclus les événements d'anomalie
+      community-id: true # Activer l'ID de communauté
 
   # Sortie "fast log" (simple, pour les alertes)
   - fast:
       enabled: yes
       filename: fast.log
+
+  # Sortie "stats.log" (plus détaillée que eve stats)
+  - stats:
+      enabled: yes
+      filename: stats.log
+      interval: 8
+      totals: yes      # include totals
+      threads: yes     # per thread stats
+      # Per-protocol stats
+      # decoder-events: yes
+      # stream-events: yes
 
   # Sortie "unified2" (format binaire, pour Barnyard2 etc.)
   # - unified2-alert:
@@ -358,38 +334,31 @@ outputs:
 # run-as:
   # user: suricata
   # group: suricata
-
-# Chemin vers le fichier PID
-pid-file: /var/run/suricata/suricata.pid
 EOF
 
   # Définir des permissions raisonnables pour le fichier généré
   chmod 644 "$config_path"
   # Essayer de définir le groupe si possible (peut échouer si l'utilisateur n'a pas les droits sur l'hôte)
-  chgrp suricata "$config_path" 2>/dev/null || true
+  # chgrp suricata "$config_path" 2>/dev/null || true
 
   # Vérifier explicitement la création du fichier sur l'hôte
-  print_info "Vérification du fichier généré sur l'hôte :"
+  print_info "Vérification du fichier de configuration généré sur l'hôte :"
   ls -l "$config_path"
 }
 
 # Afficher le titre principal
 clear
-print_title "ASSISTANT DE CONSTRUCTION D'IMAGE DOCKER SURICATA"
-echo "Ce script va vous aider à construire une image Docker pour Suricata."
-echo "À chaque étape, vous pourrez choisir les options souhaitées ou accepter les valeurs par défaut."
+print_title "ASSISTANT DE BUILD ET RUN POUR SURICATA AVEC DOCKER COMPOSE"
+echo "Ce script va configurer suricata.yaml, construire les images et lancer les services définis dans docker-compose.yml."
 echo
 
 # Demander toutes les options à l'utilisateur
 ask_mode
 ask_interface
 ask_home_net
-ask_runmode # Demander le Runmode ici
-ask_docker_tag
-ask_volume_logs
-ask_volume_config
-ask_detached
+ask_runmode
 ask_no_cache
+ask_detached
 
 # Sauvegarder la configuration mise à jour
 save_config
@@ -399,101 +368,89 @@ generate_suricata_yaml
 
 # Afficher le récapitulatif
 print_title "RÉCAPITULATIF DE LA CONFIGURATION"
-print_info "Mode: $MODE"
-print_info "Interface: $INTERFACE"
-print_info "HOME_NET: $HOME_NET"
-print_info "Runmode: $RUNMODE" # Afficher le Runmode
-print_info "Tag Docker: $DOCKER_TAG"
-print_info "Volume logs: $VOLUME_LOGS"
-print_info "Volume config: $VOLUME_CONFIG"
-print_info "Mode détaché: $RUN_DETACHED"
-# Retrait de l'affichage lié à CUSTOM_ENTRYPOINT
+print_info "Mode (pour entrypoint.sh): $MODE"
+print_info "Interface (pour entrypoint.sh): $INTERFACE"
+print_info "HOME_NET (pour suricata.yaml): $HOME_NET"
+print_info "Runmode (pour suricata.yaml): $RUNMODE"
+print_info "Build sans cache: $BUILD_NO_CACHE"
+print_info "Exécution en mode détaché: $RUN_DETACHED"
+print_info "Chemin du fichier de config généré: $SURICATA_YAML_HOST_PATH"
 
 # Demander confirmation
-ask_question "Continuer avec ces paramètres? (o/n)"
+ask_question "Continuer avec ces paramètres pour construire et lancer avec docker-compose? (o/n)"
 read -r confirm
 if [[ ! "$confirm" =~ ^[oOyY]$ ]]; then
-  print_warning "Construction annulée"
+  print_warning "Opération annulée"
   exit 0
 fi
 
-# Vérifier si le fichier entrypoint.sh existe (toujours nécessaire)
+# Vérifier si le fichier entrypoint.sh existe
 if [ ! -f "$ENTRYPOINT_FILE" ]; then
   print_error "Erreur: Script entrypoint.sh non trouvé dans $ENTRYPOINT_FILE"
-  # On pourrait proposer de le créer à partir d'un template ici si besoin
   exit 1
 fi
 
-# Construire l'image Docker
-print_title "CONSTRUCTION DE L'IMAGE DOCKER"
-print_info "Exécution de la commande de build Docker..."
+# Vérifier si le fichier docker-compose.yml existe
+if [ ! -f "$DOCKER_COMPOSE_FILE" ]; then
+  print_error "Erreur: Fichier docker-compose.yml non trouvé dans $DOCKER_COMPOSE_FILE"
+  exit 1
+fi
 
-# Construire l'image Docker
-docker build $BUILD_ARGS \
-  -t "$DOCKER_TAG" \
-  -f "${ROOT_DIR}/Dockerfile" \
-  "${ROOT_DIR}" # Plus besoin de passer les build-args MODE, INTERFACE, HOME_NET
+# Construire les images Docker via docker-compose
+print_title "CONSTRUCTION DES IMAGES DOCKER VIA DOCKER-COMPOSE"
+print_info "Exécution de la commande docker-compose build..."
+
+COMPOSE_BUILD_ARGS=""
+if [ "$BUILD_NO_CACHE" = true ]; then
+  COMPOSE_BUILD_ARGS="--no-cache"
+fi
+
+docker-compose -f "$DOCKER_COMPOSE_FILE" build $COMPOSE_BUILD_ARGS
 
 # Vérifier si la construction a réussi
 if [ $? -eq 0 ]; then
   print_title "CONSTRUCTION RÉUSSIE"
-  print_info "L'image Docker a été construite avec succès: $DOCKER_TAG"
+  print_info "Les images Docker définies dans docker-compose.yml ont été construites avec succès."
   echo ""
-  
-  # Préparer la commande d'exécution
-  DETACHED_FLAG=""
+
+  # Préparer la commande d'exécution docker-compose up
+  COMPOSE_UP_ARGS=""
   if [ "$RUN_DETACHED" = true ]; then
-    DETACHED_FLAG="-d"
+    COMPOSE_UP_ARGS="-d"
   fi
-  
-  # Générer la commande d'exécution complète
-  DOCKER_RUN_CMD="docker run $DETACHED_FLAG --name suricata --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW --cap-add=SYS_NICE"
-  
-  # Ajouter les volumes
-  if [ -n "$VOLUME_LOGS" ]; then
-    # Créer le répertoire hôte s'il n'existe pas
-    mkdir -p "$VOLUME_LOGS"
-    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -v $VOLUME_LOGS:/var/log/suricata"
-  fi
-  
-  if [ -n "$VOLUME_CONFIG" ]; then
-    # Créer le répertoire parent sur l'hôte s'il n'existe pas
-    mkdir -p "$VOLUME_CONFIG" # Assurer que le répertoire existe
-    # Monter le répertoire de configuration hôte dans un répertoire temporaire
-    host_config_path=$(echo "$VOLUME_CONFIG" | sed 's:/$::') # Retirer le / final si présent
-    DOCKER_RUN_CMD="$DOCKER_RUN_CMD -v $host_config_path:/config-staging:ro" # Montage en lecture seule (ro) suffisant
-    # La vérification que le fichier .yaml existe à l'intérieur est toujours utile avant de lancer
-    if [ ! -f "$host_config_path/suricata.yaml" ]; then
-       print_warning "Attention: Le fichier suricata.yaml n'a pas été trouvé dans $host_config_path avant le lancement."
-    fi
-  fi
-  
-  # Ajouter les variables d'environnement (SEULEMENT MODE et INTERFACE maintenant)
-  DOCKER_RUN_CMD="$DOCKER_RUN_CMD -e MODE=$MODE -e INTERFACE=$INTERFACE"
-  
-  # Ajouter le tag de l'image
-  DOCKER_RUN_CMD="$DOCKER_RUN_CMD $DOCKER_TAG"
-  
+
+  # La configuration est maintenant dans suricata.yaml et gérée par docker-compose.yml
+  # Les variables MODE et INTERFACE sont passées via l'environnement dans docker-compose.yml
+  # Si elles n'y sont pas, il faudrait les injecter ici :
+  # export MODE=$MODE
+  # export INTERFACE=$INTERFACE
+  # (Mais docker-compose.yml les a déjà définies pour le service suricata)
+
+  DOCKER_COMPOSE_UP_CMD="docker-compose -f \"$DOCKER_COMPOSE_FILE\" up $COMPOSE_UP_ARGS"
+
   # Afficher la commande d'exécution
-  echo "Pour exécuter le conteneur avec les paramètres actuels:"
-  echo "$DOCKER_RUN_CMD"
+  echo "Pour exécuter les services avec les paramètres actuels:"
+  echo "(Assurez-vous que les variables d'environnement MODE et INTERFACE sont bien gérées par docker-compose.yml ou exportées)"
+  echo "(Assurez-vous que le fichier $SURICATA_YAML_HOST_PATH existe et est correctement référencé dans docker-compose.yml)"
+  echo "$DOCKER_COMPOSE_UP_CMD"
   echo ""
-  echo "Commandes utiles:"
-  echo "- Voir les logs: docker logs suricata"
-  echo "- Arrêter le conteneur: docker stop suricata"
-  echo "- Redémarrer le conteneur: docker restart suricata"
-  echo "- Supprimer le conteneur: docker rm suricata"
+  echo "Commandes utiles (une fois lancé):"
+  echo "- Voir les logs des services: docker-compose -f \"$DOCKER_COMPOSE_FILE\" logs -f"
+  echo "- Voir les logs d'un service spécifique: docker-compose -f \"$DOCKER_COMPOSE_FILE\" logs -f suricata"
+  echo "- Arrêter les services: docker-compose -f \"$DOCKER_COMPOSE_FILE\" down"
+  echo "- Arrêter et supprimer les volumes: docker-compose -f \"$DOCKER_COMPOSE_FILE\" down -v"
+  echo "- Accéder à l'interface web: http://localhost:5001 (ou l'IP de votre hôte Docker)"
   echo ""
-  
-  # Demander à l'utilisateur s'il souhaite exécuter l'image maintenant
-  ask_question "Voulez-vous exécuter l'image maintenant? (o/n)"
+
+  # Demander à l'utilisateur s'il souhaite exécuter maintenant
+  ask_question "Voulez-vous lancer les services avec docker-compose up maintenant? (o/n)"
   read -r response
   if [[ "$response" =~ ^[oOyY]$ ]]; then
-    print_info "Exécution de l'image Docker..."
-    eval $DOCKER_RUN_CMD
+    print_info "Lancement des services via docker-compose up..."
+    eval $DOCKER_COMPOSE_UP_CMD
   fi
 else
-  print_error "La construction de l'image Docker a échoué."
+  print_error "La construction via docker-compose build a échoué."
   exit 1
 fi
 

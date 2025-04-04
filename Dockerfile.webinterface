@@ -1,0 +1,27 @@
+# Utiliser une image Python légère
+FROM python:3.10-slim
+
+LABEL maintainer="Votre Nom <votre@email.com>"
+LABEL description="Interface Web (Flask + Frontend) pour Suricata"
+
+# Définir le répertoire de travail
+WORKDIR /app
+
+# Copier d'abord le fichier requirements.txt pour profiter du cache Docker
+COPY web/api/requirements.txt /app/api/
+
+# Installer les dépendances Python
+RUN pip install --no-cache-dir -r /app/api/requirements.txt
+
+# Copier tout le contenu du dossier web (frontend et backend)
+COPY web/ /app/web/
+
+# Définir le répertoire de travail final où se trouve app.py
+WORKDIR /app/web
+
+# Exposer le port sur lequel Flask écoute
+EXPOSE 5001
+
+# Définir la commande pour lancer l'application Flask
+# Utiliser gunicorn ou waitress serait mieux en production
+CMD ["python", "api/app.py"]

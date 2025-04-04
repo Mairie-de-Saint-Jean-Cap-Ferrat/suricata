@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suricata Control Interface</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Interface de Contrôle Suricata</h1>
+
+    <div id="controls">
+        <h2>Contrôles Suricata (via Backend API)</h2>
+        <!-- <button id="start-btn">Start Suricata (Not Implemented)</button> -->
+        <button id="reload-btn">Recharger les Règles</button>
+        <button id="shutdown-btn">Arrêter Suricata</button>
+        <button id="uptime-btn">Uptime</button>
+        <button id="iface-list-btn">Lister Interfaces</button>
+        <!-- Add more buttons for other commands as needed -->
+         <p>
+             <em>Note: L'arrêt de Suricata via ce bouton peut nécessiter un redémarrage manuel du service. Le démarrage n'est pas supporté via cette interface.</em>
+         </p>
+         <div id="command-status">
+            <p>Statut de la dernière commande : <span id="status-message">Prêt</span></p>
+         </div>
+    </div>
+
+    <h2>Visualisation des Logs Suricata (Statique)</h2>
+    <p>Ceci affiche le contenu des fichiers <code>eve.json</code> ou <code>suricata.log</code> s'ils sont présents dans un sous-dossier <code>/logs/</code> relatif à cette page et servis par le serveur web.</p>
+    <div id="log-controls">
+        <button id="refresh-log">Rafraîchir les Logs</button>
+    </div>
+    <div id="log-container">
+        <pre id="log-content">Chargement des logs...</pre>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html> 

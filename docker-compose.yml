@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  suricata:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Use the entrypoint defined in the Dockerfile
+    # command: ["-i", "eth0"] # Example command, adjust as needed or rely on entrypoint
+    cap_add:
+      - NET_ADMIN # Needed for network interface operations
+      - SYS_NICE  # Recommended for performance
+      - IPC_LOCK # Potential requirement depending on config/runmode
+    network_mode: "host" # Simple pour accès aux interfaces mais peut être problématique pour la communication inter-service standard
+    # Alternative si host mode pose problème: Créez un réseau Docker et attachez les deux services
+    # networks:
+    #   - suricata-net
+    volumes:
+      - suricata-logs:/var/log/suricata # Volume pour les logs
+      - suricata-rules:/etc/suricata/rules # Volume pour les règles custom
+      - ./docker/run/etc/suricata.yaml:/etc/suricata/suricata.yaml:ro # Fichier de config principal (lecture seule)
+      - suricata-run:/var/run/suricata # Volume pour le socket et PID
+    environment:
+      # Pass environment variables to entrypoint.sh if needed
+      - SURICATA_INTERFACE=eth0 # Default interface, can be overridden
+      # - RUN_MODE=IDS
+      # - OTHER_OPTIONS="-v"
+      # Assurez-vous que suricata.yaml est configuré pour utiliser /var/run/suricata/suricata-command.socket
+      # unix-command:
+      #   enabled: yes
+      #   filename: suricata-command.socket # Nom du fichier dans /var/run/suricata/
+    restart: unless-stopped
+    # user: "suricata:suricata" # Ne pas lancer en root si possible, mais peut être nécessaire pour les capacités
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.webinterface # Utilise notre nouveau Dockerfile
+    ports:
+      - "5001:5001" # Expose le port de Flask (5001) sur le port hôte 5001
+    volumes:
+      - suricata-run:/var/run/suricata:ro # Monte le volume du socket (lecture seule suffit pour le client)
+      # Le code est déjà dans l'image grâce au build
+      # Plus besoin de monter ./web ou nginx.conf
+      # Monter les logs n'est pas directement utile car Flask ne les sert pas
+    environment:
+      # Indique à l'app Flask où trouver le socket (correspond au montage)
+      - SURICATA_SOCKET_PATH=/var/run/suricata/suricata-command.socket
+    depends_on:
+      - suricata
+    restart: unless-stopped
+    # networks:
+    #   - suricata-net
+
+volumes:
+  suricata-logs:
+  suricata-rules:
+  suricata-run: # Définition du volume nommé pour le socket
+
+# networks:
+#   suricata-net:
+#     driver: bridge
+
+# Note:
+# - Ensure your Dockerfile builds correctly.
+# - The `network_mode: "host"` is simple but less secure. Consider bridge networking
+#   with specific port mappings if host mode isn't suitable.
+# - Adjust the SURICATA_INTERFACE environment variable or entrypoint logic
+#   based on your actual network setup.
+# - You might need to create the ./suricata-logs directory on the host first.
+# - The rules volume is optional; Suricata can use rules baked into the image
+#   or downloaded via suricata-update.
+# - Ensure suricata.yaml is configured correctly for your chosen interface
+#   and logging (especially eve.json). It should log to /var/log/suricata.
+# - Vérifiez que suricata.yaml dans ce dossier est configuré pour activer le socket Unix
+#   et le placer dans /var/run/suricata/ avec le nom `suricata-command.socket`.
+#   Exemple de configuration dans suricata.yaml:
+#   unix-command:
+#     enabled: yes
+#     # Le chemin est relatif au répertoire de travail de Suricata ou PWD
+#     # S'il est lancé avec le pid-file dans /var/run/suricata, il devrait le mettre là.
+#     # Sinon, spécifiez un chemin absolu si nécessaire, mais le volume est monté sur /var/run/suricata.
+#     filename: suricata-command.socket # Nom attendu par le backend web
+# - Le network_mode: host pour suricata peut empêcher la communication directe via nom de service
+#   si vous passez en mode bridge. Le partage du socket via volume reste la méthode clé ici.
+# - Le service web (`web`) doit avoir les permissions pour lire le socket créé par Suricata.
+#   Le volume nommé géré par Docker devrait faciliter cela. 
