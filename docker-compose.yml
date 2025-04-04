@@ -33,9 +33,11 @@ services:
       - suricata-run:/var/run/suricata:ro
       # Monter le volume des logs de Suricata en lecture seule dans le dossier 'logs' du CWD de l'app Flask
       - suricata-logs:/app/web/logs:ro
-      # AJOUT: Monter le répertoire de configuration de Suricata pour modifier enable/disable.conf
-      # ATTENTION: Donner accès en écriture à la configuration depuis le web est un risque de sécurité.
-      - ./docker/run/etc:/etc/suricata:rw # Monter le dossier local qui est copié dans l'image suricata
+      # Monter le répertoire de configuration de Suricata pour modifier enable/disable.conf
+      - ./docker/run/etc:/etc/suricata:rw 
+      # AJOUT: Monter le socket Docker de l'hôte
+      # ATTENTION: Risque de sécurité majeur ! Donne un accès privilégié à l'hôte.
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - SURICATA_SOCKET_PATH=/var/run/suricata/suricata-command.socket
     depends_on:

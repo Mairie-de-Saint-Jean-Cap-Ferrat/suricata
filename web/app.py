@@ -2,7 +2,8 @@ import os
 import socket
 import json
 import logging
-from collections import Counter
+import subprocess # AJOUT pour exécuter des commandes externes
+from collections import Counter, deque # AJOUT: deque pour lire les dernières lignes efficacement
 from flask import Flask, request, jsonify, send_from_directory
 
 # Assuming the Flask app is run from the /app/web directory as set in Dockerfile.webinterface
@@ -208,54 +209,189 @@ def save_config_file(filename):
     except Exception as e:
         return jsonify({"error": f"Failed to save {filename}: {e}"}), 500
 
-# --- NOUVEL ENDPOINT POUR LES STATISTIQUES ---
-@app.route('/api/stats/top_signatures', methods=['GET'])
-def get_top_signatures():
-    """Reads eve.json and returns the top 10 alert signatures."""
-    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
-    logger.info(f"Attempting to read statistics from: {eve_path}")
+# --- NOUVEL ENDPOINT POUR DÉCLENCHER SURICATA-UPDATE --- 
+@app.route('/api/run-suricata-update', methods=['POST'])
+def run_suricata_update():
+    """Exécute 'docker compose exec suricata suricata-update' via le socket Docker monté."""
+    logger.info("Attempting to run suricata-update via docker compose exec...")
 
-    if not os.path.exists(eve_path):
-        logger.error(f"Statistics file not found: {eve_path}")
-        return jsonify({"error": f"{EVE_JSON_FILE} not found in the logs directory."}), 404
-
-    signature_counts = Counter()
-    lines_processed = 0
-    errors_parsing = 0
+    # Assurez-vous que le service s'appelle bien 'suricata' dans docker-compose.yml
+    command = ["docker", "compose", "exec", "suricata", "suricata-update"]
+    # Le répertoire de travail du conteneur web est /app/web, mais docker compose devrait fonctionner 
+    # depuis n'importe où si docker.sock est monté. Spécifier le CWD du projet hôte peut être plus sûr si nécessaire.
+    # Nous supposons que le contexte docker compose est correctement géré.
 
     try:
-        with open(eve_path, 'r') as f:
-            for line in f:
-                lines_processed += 1
-                try:
-                    event = json.loads(line)
-                    # Vérifier si c'est une alerte et si la signature existe
-                    if event.get('event_type') == 'alert' and 'alert' in event and 'signature' in event['alert']:
-                        signature_counts[event['alert']['signature']] += 1
-                except json.JSONDecodeError:
-                    errors_parsing += 1
-                    # Logger l'erreur peut être trop verbeux, on logue juste à la fin si besoin
-                    continue # Passer à la ligne suivante en cas d'erreur JSON
+        # Exécuter la commande
+        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=120) # Timeout de 2 minutes
+        
+        logger.info(f"suricata-update executed successfully. Output:\n{result.stdout}")
+        # Renvoyer une partie de la sortie (peut être long)
+        output_summary = result.stdout[-1000:] # Renvoyer les 1000 derniers caractères
+        return jsonify({
+            "status": "success", 
+            "message": "suricata-update executed successfully.",
+            "output_summary": output_summary
+        })
 
-        if errors_parsing > 0:
-             logger.warning(f"Encountered {errors_parsing} JSON decoding errors while processing {eve_path}.")
-
-        # Obtenir les 10 signatures les plus fréquentes
-        top_10 = signature_counts.most_common(10)
-
-        # Préparer les données pour Chart.js
-        labels = [item[0] for item in top_10]
-        values = [item[1] for item in top_10]
-
-        logger.info(f"Successfully processed {lines_processed} lines from {eve_path}. Found {len(signature_counts)} unique signatures.")
-        return jsonify({"labels": labels, "values": values})
-
-    except FileNotFoundError: # Double check, bien que déjà fait plus haut
-         logger.error(f"File not found error during processing: {eve_path}")
-         return jsonify({"error": f"{EVE_JSON_FILE} not found during processing."}), 404
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to execute suricata-update. Return code: {e.returncode}")
+        logger.error(f"Stderr:\n{e.stderr}")
+        logger.error(f"Stdout:\n{e.stdout}")
+        return jsonify({
+            "status": "error", 
+            "message": f"Failed to execute suricata-update. Check backend logs.",
+            "stderr": e.stderr,
+            "stdout": e.stdout
+        }), 500
+    except subprocess.TimeoutExpired:
+         logger.error("suricata-update command timed out.")
+         return jsonify({"status": "error", "message": "suricata-update command timed out after 120 seconds."}), 500
+    except FileNotFoundError:
+        logger.error("'docker' command not found. Is Docker CLI installed in the web container and docker.sock mounted?")
+        return jsonify({"status": "error", "message": "Docker command not found in web container."}), 500
     except Exception as e:
-        logger.error(f"An unexpected error occurred while processing statistics: {e}")
-        return jsonify({"error": f"An unexpected error occurred while processing {EVE_JSON_FILE}: {e}"}), 500
+        logger.error(f"An unexpected error occurred while running suricata-update: {e}")
+        return jsonify({"status": "error", "message": f"An unexpected error occurred: {e}"}), 500
+
+# --- ENDPOINTS POUR LES STATISTIQUES (Mis à jour et Nouveaux) --- 
+
+def parse_eve_json_lines(filepath, max_lines=2000, event_filter=None):
+    """Lit les N dernières lignes d'eve.json et parse le JSON.
+       Retourne une liste d'événements décodés.
+       Peut filtrer par event_type si spécifié.
+    """
+    try:
+        with open(filepath, 'r') as f:
+            # Utiliser deque pour garder seulement les N dernières lignes en mémoire
+            # Ceci est plus efficace que de lire tout le fichier pour les gros logs
+            last_lines = deque(f, maxlen=max_lines)
+        
+        events = []
+        for line in last_lines:
+            try:
+                event = json.loads(line)
+                if event_filter is None or event.get('event_type') == event_filter:
+                    events.append(event)
+            except json.JSONDecodeError:
+                logger.warning(f"Skipping malformed JSON line in {filepath}: {line.strip()}")
+                continue
+        logger.info(f"Parsed {len(events)} events (type: {event_filter or 'any'}) from last {max_lines} lines of {filepath}")
+        return events
+    except FileNotFoundError:
+        logger.error(f"Eve JSON file not found at {filepath}")
+        return []
+    except Exception as e:
+        logger.error(f"Error reading/parsing {filepath}: {e}")
+        return []
+
+@app.route('/api/stats/top_signatures', methods=['GET'])
+def get_top_signatures():
+    """Lit eve.json et retourne les top 10 signatures d'alerte (MODIFIÉ pour utiliser parse_eve_json_lines)."""
+    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
+    logger.info(f"Attempting to read alert statistics from: {eve_path}")
+
+    # Lire ~5000 dernières lignes pour trouver des alertes
+    events = parse_eve_json_lines(eve_path, max_lines=5000, event_filter='alert') 
+
+    if not events:
+        # Pas forcément une erreur, peut juste être vide
+        logger.info("No 'alert' events found in recent log lines.")
+        return jsonify({"labels": [], "values": []})
+
+    signature_counts = Counter()
+    for event in events:
+         # Vérifier la structure
+        if 'alert' in event and isinstance(event['alert'], dict) and 'signature' in event['alert']:
+             signature_counts[event['alert']['signature']] += 1
+
+    top_10 = signature_counts.most_common(10)
+    labels = [item[0] for item in top_10]
+    values = [item[1] for item in top_10]
+
+    logger.info(f"Found {len(signature_counts)} unique alert signatures in recent lines.")
+    return jsonify({"labels": labels, "values": values})
+
+@app.route('/api/stats/latest_counters', methods=['GET'])
+def get_latest_counters():
+    """Extrait les compteurs du DERNIER événement 'stats' trouvé dans eve.json."""
+    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
+    logger.info(f"Attempting to read latest 'stats' event from: {eve_path}")
+
+    # Lire les ~500 dernières lignes (les stats sont fréquentes)
+    events = parse_eve_json_lines(eve_path, max_lines=500, event_filter='stats')
+
+    if not events:
+        logger.warning("No 'stats' events found in recent log lines.")
+        return jsonify({"error": "No recent stats events found."}), 404
+
+    # Le dernier événement dans la liste est le plus récent trouvé dans les lignes lues
+    latest_stats_event = events[-1] 
+    
+    # Extraire les sections intéressantes (capture, decoder, flow, app_layer)
+    stats_data = latest_stats_event.get('stats', {})
+    counters = {
+        "timestamp": latest_stats_event.get("timestamp"),
+        "capture": stats_data.get("capture", {}),
+        "decoder": stats_data.get("decoder", {}),
+        "flow_stats": stats_data.get("flow", {}), # Renommé pour éviter conflit avec app_layer.flow
+        "app_layer": stats_data.get("app_layer", {})
+    }
+    
+    logger.info(f"Returning latest counters from timestamp: {counters.get('timestamp')}")
+    return jsonify(counters)
+
+@app.route('/api/stats/top_dns', methods=['GET'])
+def get_top_dns():
+    """Analyse les événements DNS récents pour trouver les noms de domaine les plus demandés."""
+    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
+    logger.info(f"Attempting to read DNS query statistics from: {eve_path}")
+
+    # Lire ~2000 dernières lignes pour trouver des requêtes DNS
+    events = parse_eve_json_lines(eve_path, max_lines=2000, event_filter='dns') 
+
+    if not events:
+        logger.info("No 'dns' events found in recent log lines.")
+        return jsonify({"labels": [], "values": []})
+
+    dns_counts = Counter()
+    for event in events:
+        # Compter seulement les requêtes (type query) et si rrname existe
+        if event.get('dns', {}).get('type') == 'query' and 'rrname' in event.get('dns', {}):
+            dns_counts[event['dns']['rrname']] += 1
+
+    top_10 = dns_counts.most_common(10)
+    labels = [item[0] for item in top_10]
+    values = [item[1] for item in top_10]
+
+    logger.info(f"Found {len(dns_counts)} unique DNS query names in recent lines.")
+    return jsonify({"labels": labels, "values": values})
+
+@app.route('/api/stats/top_tls_sni', methods=['GET'])
+def get_top_tls_sni():
+    """Analyse les événements TLS récents pour trouver les SNI les plus fréquents."""
+    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
+    logger.info(f"Attempting to read TLS SNI statistics from: {eve_path}")
+
+    # Lire ~2000 dernières lignes pour trouver des événements TLS
+    events = parse_eve_json_lines(eve_path, max_lines=2000, event_filter='tls') 
+
+    if not events:
+        logger.info("No 'tls' events found in recent log lines.")
+        return jsonify({"labels": [], "values": []})
+
+    sni_counts = Counter()
+    for event in events:
+        # Vérifier si tls.sni existe
+        if 'sni' in event.get('tls', {}):
+            sni_counts[event['tls']['sni']] += 1
+
+    top_10 = sni_counts.most_common(10)
+    labels = [item[0] for item in top_10]
+    values = [item[1] for item in top_10]
+
+    logger.info(f"Found {len(sni_counts)} unique TLS SNIs in recent lines.")
+    return jsonify({"labels": labels, "values": values})
 
 if __name__ == '__main__':
     # Make sure to run with a production server like gunicorn or waitress in production

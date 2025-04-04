@@ -9,18 +9,19 @@
     <!-- Custom CSS (peut être chargé après Bootstrap pour surcharger) -->
     <link rel="stylesheet" href="style.css">
     <style>
-        /* Specific chart box constraints remain relevant */
+        /* Specific chart box constraints */
         .chart-box {
             position: relative;
-            min-height: 400px; /* Utiliser min-height pour flexibilité */
+            height: 400px; /* Hauteur FIXE pour le conteneur */
             width: 100%; /* Prendra la largeur de la colonne Bootstrap */
             margin-bottom: 20px; /* Espacement sous le graphique */
         }
-        #topAlertsChart {
-            max-height: 400px; /* Limite la hauteur du canvas */
-            width: 100% !important; /* Force la largeur */
-        }
-        #log-content {
+        /* Suppression des styles spécifiques à topAlertsChart */
+        /* #topAlertsChart {
+            max-height: 400px; 
+            width: 100% !important; 
+        } */
+        #log-content { /* Bien que non utilisé, on le garde pour l'instant */
             max-height: 500px;
             overflow-y: auto;
             background-color: #f8f9fa; /* Couleur Bootstrap pour fond léger */
@@ -71,12 +72,42 @@
                      <div class="card-header">
                          Statistiques Visuelles
                      </div>
-                     <div class="card-body" id="charts-container">
-                         <div class="chart-box">
-                             <h5 class="card-title">Top 10 Signatures d'Alerte</h5>
-                             <canvas id="topAlertsChart"></canvas>
+                     <div class="card-body row" id="charts-container">
+                         <div class="col-md-6 mb-4 chart-box">
+                              <h5 class="card-title">Top 10 Signatures d'Alerte</h5>
+                              <canvas id="topAlertsChart"></canvas>
+                          </div>
+
+                         <!-- NOUVEAU: Top DNS Queries -->
+                         <div class="col-md-6 mb-4 chart-box">
+                            <h5 class="card-title">Top 10 Requêtes DNS</h5>
+                            <canvas id="topDnsChart"></canvas>
                          </div>
-                         <!-- D'autres graphiques ici -->
+
+                         <!-- NOUVEAU: Top TLS SNI -->
+                         <div class="col-md-6 mb-4 chart-box">
+                            <h5 class="card-title">Top 10 TLS SNI</h5>
+                            <canvas id="topTlsSniChart"></canvas>
+                         </div>
+
+                         <!-- NOUVEAU: Protocoles L3/L4 (Decoder) -->
+                         <div class="col-md-6 mb-4 chart-box">
+                             <h5 class="card-title">Répartition Protocoles L3/L4 (Decodeur)</h5>
+                             <canvas id="decoderProtoChart"></canvas>
+                         </div>
+
+                         <!-- NOUVEAU: Protocoles Applicatifs (Flow) -->
+                         <div class="col-md-6 mb-4 chart-box">
+                             <h5 class="card-title">Répartition Protocoles Applicatifs (Flow)</h5>
+                             <canvas id="appLayerProtoChart"></canvas>
+                         </div>
+
+                         <!-- NOUVEAU: Paquets Reçus/Perdus (Graphique temporel - plus complexe, peut être ajouté plus tard) -->
+                         <!-- <div class="col-12 mb-4 chart-box" style="min-height: 300px;">
+                             <h5 class="card-title">Paquets Reçus vs Perdus (Historique récent)</h5>
+                             <canvas id="captureStatsChart"></canvas>
+                         </div> -->
+
                      </div>
                      <div class="card-footer text-end">
                          <button id="refresh-charts" class="btn btn-sm btn-outline-secondary">Rafraîchir Graphiques</button>
@@ -97,11 +128,7 @@
                              Modifiez les fichiers pour activer/désactiver des règles spécifiques par SID, groupe ou regex.
                              Voir la <a href="https://docs.suricata.io/en/latest/rule-management/suricata-update.html#controlling-which-rules-are-used" target="_blank" rel="noopener noreferrer">documentation Suricata-Update</a> pour la syntaxe.
                          </p>
-                         <div class="alert alert-warning small" role="alert">
-                            <strong>Important:</strong> Après avoir sauvegardé, vous devez exécuter 
-                            <code>docker compose exec suricata suricata-update</code> dans votre terminal, puis cliquer sur "Recharger les Règles" ci-dessus pour appliquer les changements.
-                         </div>
-                        <div class="row">
+                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label for="enable-conf-content" class="form-label"><code>enable.conf</code> (Activer des règles)</label>
                                 <textarea class="form-control" id="enable-conf-content" rows="10" placeholder="Exemple:
@@ -119,26 +146,19 @@ re:heartbleed"></textarea>
                                 <div class="form-text">Désactiver des signatures spécifiques, des groupes ou via regex.</div>
                             </div>
                         </div>
-                        <button id="save-config-btn" class="btn btn-success">Sauvegarder les Modifications</button>
-                         <span id="config-status-message" class="ms-3 text-muted"></span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Section Logs -->
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        Visualisation des Logs (eve.json / suricata.log)
-                        <button id="refresh-log" class="btn btn-sm btn-outline-primary">Rafraîchir Logs</button>
-                    </div>
-                    <div class="card-body">
-                        <p class="card-text small text-muted">Contenu des fichiers logs montés (rafraîchissement manuel).</p>
-                        <div id="log-container">
-                             <pre id="log-content">Chargement des logs...</pre>
-                        </div>
+                        <button id="save-config-btn" class="btn btn-success">Sauvegarder et Appliquer les Règles</button> 
+                         <span id="config-status-message" class="ms-3"></span>
+                         
+                         <!-- Zone pour l'étape post-sauvegarde (simplifiée) -->
+                         <div id="post-save-status" class="mt-4" style="display: none;">
+                             <div id="update-status" class="alert alert-info" role="alert">
+                                 Exécution de <code>suricata-update</code>...
+                             </div>
+                             <div id="reload-status" class="alert alert-secondary" role="alert" style="display: none;">
+                                 Rechargement des règles dans Suricata...
+                             </div>
+                             <pre id="update-output" class="bg-dark text-light p-2 rounded small" style="max-height: 200px; overflow-y: auto; display:none;"></pre>
+                         </div>
                     </div>
                 </div>
             </div>
