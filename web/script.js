@@ -20,6 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // AJOUT: Éléments pour les logs en direct et graphique temporel
     const liveLogContent = document.getElementById('live-log-content');
     const logStreamStatus = document.getElementById('log-stream-status');
+    // Vérification que les éléments existent
+    if (!liveLogContent || !logStreamStatus) {
+        console.error("Log display elements not found!");
+    }
     const selectEveButton = document.getElementById('select-eve-btn');
     const selectSuricataButton = document.getElementById('select-suricata-btn');
     const currentLogfileSpan = document.getElementById('current-logfile');
@@ -640,9 +644,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         console.log(`Connecting to log stream for ${filename}...`);
         eventSource = new EventSource(`/api/logs/stream?logfile=${encodeURIComponent(filename)}`); // Ajouter le paramètre
-        currentLogfileSpan.textContent = filename; // Mettre à jour le titre
-        currentLogLines = ["Connexion au flux de logs..."]; // Reset log display
-        liveLogContent.textContent = currentLogLines.join('\n');
+        if(currentLogfileSpan) currentLogfileSpan.textContent = filename; // Mettre à jour le titre
+        
+        // Log initial avant connexion
+        if (liveLogContent) {
+             currentLogLines = [`Tentative de connexion au flux pour ${filename}...`]; 
+             liveLogContent.textContent = currentLogLines.join('\n');
+        } else {
+             console.error("liveLogContent element is null!");
+        }
+        if (logStreamStatus) {
+             logStreamStatus.textContent = 'Connexion...';
+             logStreamStatus.className = 'badge bg-warning';
+        } else {
+             console.error("logStreamStatus element is null!");
+        }
 
         eventSource.onopen = () => {
             console.log("Log stream connected.");
@@ -713,6 +729,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const setupLogSelection = () => {
         const buttons = [selectEveButton, selectSuricataButton];
         buttons.forEach(button => {
+            // Vérification existence bouton
+            if (!button) {
+                console.warn(`Log selection button not found (might be normal if element ID changed).`);
+                return;
+            }
             if (button) {
                 button.addEventListener('click', () => {
                     const logfile = button.getAttribute('data-logfile');
