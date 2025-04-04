@@ -44,7 +44,8 @@
 				"mindaro-dev.file-downloader",
 				"shyykoserhiy.git-autoconfig",
 				"ms-azuretools.vscode-docker",
-				"vsls-contrib.gistfs"
+				"vsls-contrib.gistfs",
+				"tilt-dev.tiltfile"
 			]
 		}
 	}
