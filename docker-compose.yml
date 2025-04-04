@@ -5,63 +5,52 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # Use the entrypoint defined in the Dockerfile
-    # command: ["-i", "eth0"] # Example command, adjust as needed or rely on entrypoint
+    # L'entrypoint spécifie -c /etc/suricata/suricata.yaml (qui est maintenant DANS l'image)
     cap_add:
-      - NET_ADMIN # Needed for network interface operations
-      - SYS_NICE  # Recommended for performance
-      - IPC_LOCK # Potential requirement depending on config/runmode
-    network_mode: "host" # Simple pour accès aux interfaces mais peut être problématique pour la communication inter-service standard
-    # Alternative si host mode pose problème: Créez un réseau Docker et attachez les deux services
-    # networks:
-    #   - suricata-net
+      - NET_ADMIN 
+      - SYS_NICE  
+      - IPC_LOCK 
+    network_mode: "host" 
     volumes:
       - suricata-logs:/var/log/suricata # Volume pour les logs
-      - suricata-rules:/etc/suricata/rules # Volume pour les règles custom
-      - ./docker/run/etc/suricata.yaml:/etc/suricata/suricata.yaml:ro # Fichier de config principal (lecture seule)
+      # Le volume de config n'est plus monté, il est dans l'image
+      # - ./docker/run/etc:/etc/suricata:rw 
+      - suricata-rules:/etc/suricata/rules # Volume pour les règles
       - suricata-run:/var/run/suricata # Volume pour le socket et PID
     environment:
-      # Pass environment variables to entrypoint.sh if needed
-      - SURICATA_INTERFACE=eth0 # Default interface, can be overridden
-      # - RUN_MODE=IDS
-      # - OTHER_OPTIONS="-v"
-      # Assurez-vous que suricata.yaml est configuré pour utiliser /var/run/suricata/suricata-command.socket
-      # unix-command:
-      #   enabled: yes
-      #   filename: suricata-command.socket # Nom du fichier dans /var/run/suricata/
+      - SURICATA_INTERFACE=eth0 
+      - MODE=ids # La variable MODE est toujours utilisée par l'entrypoint
     restart: unless-stopped
-    # user: "suricata:suricata" # Ne pas lancer en root si possible, mais peut être nécessaire pour les capacités
 
   web:
     build:
       context: .
-      dockerfile: Dockerfile.webinterface # Utilise notre nouveau Dockerfile
+      dockerfile: Dockerfile.webinterface
     ports:
-      - "5001:5001" # Expose le port de Flask (5001) sur le port hôte 5001
+      - "5001:5001"
     volumes:
-      - suricata-run:/var/run/suricata:ro # Monte le volume du socket (lecture seule suffit pour le client)
-      # Le code est déjà dans l'image grâce au build
-      # Plus besoin de monter ./web ou nginx.conf
-      # Monter les logs n'est pas directement utile car Flask ne les sert pas
+      - suricata-run:/var/run/suricata:ro
     environment:
-      # Indique à l'app Flask où trouver le socket (correspond au montage)
       - SURICATA_SOCKET_PATH=/var/run/suricata/suricata-command.socket
     depends_on:
       - suricata
     restart: unless-stopped
-    # networks:
-    #   - suricata-net
 
 volumes:
   suricata-logs:
   suricata-rules:
-  suricata-run: # Définition du volume nommé pour le socket
+  suricata-run:
 
 # networks:
 #   suricata-net:
 #     driver: bridge
 
 # Note:
+# - Le script docker-build.sh génère le fichier ./docker/run/etc/suricata.yaml.
+# - Le Dockerfile COPIE ce fichier dans l'image à /etc/suricata/suricata.yaml.
+# - Le volume de configuration n'est PLUS monté dans docker-compose.
+# - L'entrypoint.sh utilise -c /etc/suricata/suricata.yaml.
+# - Pour modifier la configuration, exécutez docker-build.sh PUIS reconstruisez l'image (`docker-compose build suricata`).
 # - Ensure your Dockerfile builds correctly.
 # - The `network_mode: "host"` is simple but less secure. Consider bridge networking
 #   with specific port mappings if host mode isn't suitable.

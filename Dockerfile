@@ -48,22 +48,26 @@ RUN suricata-update update-sources && \
 RUN mkdir -p /var/log/suricata /var/lib/suricata /etc/suricata /var/run/suricata && \
     chown -R suricata:suricata /var/log/suricata /var/lib/suricata /etc/suricata /var/run/suricata
 
-# Sauvegarder le fichier de configuration par défaut avant qu'il ne soit potentiellement masqué par un volume
-RUN cp /etc/suricata/suricata.yaml /etc/suricata.yaml.default
+# Supprimer la copie de la config par défaut, nous allons copier celle générée.
+# RUN cp /etc/suricata/suricata.yaml /etc/suricata.yaml.default
 
-# Configuration pour utiliser community-id
-RUN if grep -q "community-id:" /etc/suricata/suricata.yaml; then \
-        sed -i 's/^  community-id: false/  community-id: true/' /etc/suricata/suricata.yaml; \
-    else \
-        echo "  community-id: true" >> /etc/suricata/suricata.yaml; \
-    fi
+# Copier la configuration générée PAR docker-build.sh DANS l'image
+# Le fichier doit exister sur l'hôte dans ./docker/run/etc/suricata.yaml au moment du build
+COPY ./docker/run/etc/suricata.yaml /etc/suricata/suricata.yaml
+# S'assurer des bonnes permissions DANS l'image
+RUN chown suricata:suricata /etc/suricata/suricata.yaml && \
+    chmod 640 /etc/suricata/suricata.yaml
+
+# La configuration community-id doit être faite sur le fichier généré avant le build ou ici si nécessaire,
+# mais il vaut mieux le faire dans docker-build.sh lors de la génération.
 
 # Copier le script d'entrée
 COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Configuration des volumes pour les règles et logs
-VOLUME ["/etc/suricata", "/var/log/suricata"]
+# Configuration des volumes pour les règles, logs et le répertoire run (socket/pid)
+# Le volume de config principale n'est plus nécessaire ici car copiée dans l'image.
+VOLUME ["/etc/suricata/rules", "/var/log/suricata", "/var/run/suricata"]
 
 # Exposition des ports (optionnel, dépend de la configuration du réseau hôte)
 # EXPOSE 80 443 53/udp 53/tcp
@@ -76,6 +80,5 @@ RUN chmod +x /tini
 # Point d'entrée
 ENTRYPOINT ["/tini", "--", "/entrypoint.sh"]
 
-# L'utilisateur par défaut n'est pas défini ici, car Suricata doit démarrer en root
-# pour obtenir les capacités nécessaires avant de passer à un utilisateur non privilégié si configuré.
+# CMD n'est plus utile ici car l'entrypoint gère l'exécution avec les bons paramètres.
 # CMD ["suricata", "-c", "/etc/suricata/suricata.yaml", "-i", "eth0"]

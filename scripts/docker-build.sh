@@ -91,84 +91,88 @@ load_config
 
 # Fonction pour demander le mode (IDS/IPS)
 ask_mode() {
-  print_title "MODE DE FONCTIONNEMENT (pour entrypoint.sh)"
+  print_title "MODE DE FONCTIONNEMENT SURICATA (IDS/IPS)"
+  echo "Ce choix détermine si Suricata ajoute l'option '-q 0' (IPS) ou '-i <interface>' (IDS) au démarrage."
+  echo "Il est passé au conteneur via la variable d'environnement MODE."
   echo "Modes disponibles:"
-  echo "1) IDS - Détection d'intrusion uniquement (par défaut)"
-  echo "2) IPS - Prévention d'intrusion (bloque les attaques)"
+  echo "1) IDS - Détection seule (défaut)"
+  echo "2) IPS - Prévention active (nécessite configuration NFQ ou autre)"
   
-  ask_question "Choisissez le mode [1-2, défaut: $MODE]: "
+  ask_question "Choisissez le mode (sera passé via env var MODE) [1-2, défaut: $MODE]: "
   read -r choice
   
   case $choice in
     2)
       MODE="ips"
-      print_info "Mode IPS sélectionné"
+      print_info "Mode IPS sélectionné (Variable MODE='ips')"
       ;;
     *)
       MODE="ids"
-      print_info "Mode IDS sélectionné (par défaut)"
+      print_info "Mode IDS sélectionné (Variable MODE='ids')"
       ;;
   esac
 }
 
 # Fonction pour demander l'interface réseau
 ask_interface() {
-  print_title "INTERFACE RÉSEAU (pour entrypoint.sh)"
-  echo "Interfaces réseau disponibles sur l'hôte (pour info):"
+  print_title "INTERFACE RÉSEAU SURICATA (si mode IDS)"
+  echo "Nom de l'interface réseau que Suricata écoutera DANS le conteneur (ex: eth0, enp0s3)."
+  echo "Ce paramètre est utilisé par entrypoint.sh via la variable d'environnement INTERFACE uniquement si MODE=ids."
+  echo "Avec network_mode: host, cela correspond généralement à une interface de l'hôte."
+  echo "Interfaces réseau disponibles sur l'hôte (pour information):"
   
   # Lister les interfaces réseau disponibles sur l'hôte
   available_interfaces=$(ip -o link show | grep -v "lo:" | awk -F': ' '{print $2}')
   echo "$available_interfaces"
   
-  ask_question "Entrez l'interface réseau à surveiller par Suricata DANS le conteneur [défaut: $INTERFACE]: "
+  ask_question "Entrez l'interface réseau (sera passée via env var INTERFACE) [défaut: $INTERFACE]: "
   read -r input_interface
   
   if [ -n "$input_interface" ]; then
     INTERFACE="$input_interface"
   fi
-  print_info "Interface sélectionnée pour Suricata: $INTERFACE"
-  print_warning "Assurez-vous que cette interface est accessible avec network_mode: host"
+  print_info "Interface sélectionnée pour Suricata (Variable INTERFACE='$INTERFACE')"
 }
 
 # Fonction pour demander HOME_NET
 ask_home_net() {
-  print_title "RÉSEAU HOME_NET (pour suricata.yaml)"
-  echo "HOME_NET définit les réseaux considérés comme votre réseau interne."
+  print_title "CONFIGURATION DE HOME_NET (pour suricata.yaml)"
+  echo "Définit les réseaux considérés comme internes dans le fichier de configuration suricata.yaml."
   echo "Format: [192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
   
-  ask_question "Entrez votre HOME_NET [défaut: $HOME_NET]: "
+  ask_question "Entrez votre HOME_NET (sera écrit dans suricata.yaml) [défaut: $HOME_NET]: "
   read -r input_home_net
   
   if [ -n "$input_home_net" ]; then
     HOME_NET="$input_home_net"
   fi
-  print_info "HOME_NET configuré: $HOME_NET"
+  print_info "HOME_NET configuré pour suricata.yaml: $HOME_NET"
 }
 
 # Fonction pour demander le mode d'exécution (Runmode)
 ask_runmode() {
-  print_title "MODE D'EXÉCUTION (RUNMODE pour suricata.yaml)"
-  echo "Définit comment Suricata gère les threads et les paquets."
+  print_title "CONFIGURATION DU RUNMODE (pour suricata.yaml)"
+  echo "Définit comment Suricata utilise les threads pour traiter les paquets (paramètre 'runmode' dans suricata.yaml)."
   echo "Modes disponibles:"
-  echo "1) auto   - Automatique (par défaut, recommandé pour commencer)"
-  echo "2) workers - Un thread par CPU pour la capture et le traitement"
-  echo "3) autofp  - Mode "Auto Flow Pinned", essaie d'équilibrer les flux sur les threads"
+  echo "1) auto   - Automatique (défaut)"
+  echo "2) workers - Un thread par CPU pour capture/traitement"
+  echo "3) autofp  - Tente d'équilibrer les flux sur les threads"
 
-  ask_question "Choisissez le mode d'exécution [1-3, défaut: $RUNMODE]: "
+  ask_question "Choisissez le mode d'exécution (sera écrit dans suricata.yaml) [1-3, défaut: $RUNMODE]: "
   read -r runmode_choice
 
   case $runmode_choice in
     2)
       RUNMODE="workers"
-      print_info "Mode workers sélectionné"
+      print_info "Runmode 'workers' sélectionné pour suricata.yaml"
       ;;
     3)
       RUNMODE="autofp"
-      print_info "Mode autofp sélectionné"
+      print_info "Runmode 'autofp' sélectionné pour suricata.yaml"
       ;;
     *)
       RUNMODE="auto"
-      print_info "Mode auto sélectionné (par défaut)"
+      print_info "Runmode 'auto' sélectionné pour suricata.yaml"
       ;;
   esac
 }
@@ -176,34 +180,34 @@ ask_runmode() {
 # Fonction pour demander si le conteneur doit tourner en mode détaché
 ask_detached() {
   print_title "MODE DÉTACHÉ (pour docker-compose up)"
-  echo "Le mode détaché permet d'exécuter les conteneurs en arrière-plan"
+  echo "Exécute les conteneurs en arrière-plan (ajoute l'option '-d' à docker-compose up)."
   
   ask_question "Exécuter en mode détaché? (o/n) [défaut: $(if $RUN_DETACHED; then echo oui; else echo non; fi)]: "
   read -r response
   
   if [[ "$response" =~ ^[oOyY]$ ]]; then
     RUN_DETACHED=true
-    print_info "Mode détaché activé"
+    print_info "Mode détaché activé pour docker-compose up"
   else
     RUN_DETACHED=false
-    print_info "Mode détaché désactivé"
+    print_info "Mode détaché désactivé pour docker-compose up"
   fi
 }
 
 # Fonction pour demander si le cache Docker doit être utilisé pour le build
 ask_no_cache() {
   print_title "UTILISATION DU CACHE (pour docker-compose build)"
-  echo "Désactiver le cache force la reconstruction de toutes les étapes"
+  echo "Désactiver le cache force la reconstruction de toutes les étapes du Dockerfile (ajoute `--no-cache` à docker-compose build)."
   
   ask_question "Désactiver le cache Docker pendant le build? (o/n) [défaut: $(if $BUILD_NO_CACHE; then echo oui; else echo non; fi)]: "
   read -r response
   
   if [[ "$response" =~ ^[oOyY]$ ]]; then
     BUILD_NO_CACHE=true
-    print_info "Cache Docker désactivé pour le build"
+    print_info "Cache Docker désactivé pour docker-compose build"
   else
     BUILD_NO_CACHE=false
-    print_info "Cache Docker activé pour le build (par défaut)"
+    print_info "Cache Docker activé pour docker-compose build"
   fi
 }
 
@@ -368,13 +372,13 @@ generate_suricata_yaml
 
 # Afficher le récapitulatif
 print_title "RÉCAPITULATIF DE LA CONFIGURATION"
-print_info "Mode (pour entrypoint.sh): $MODE"
-print_info "Interface (pour entrypoint.sh): $INTERFACE"
-print_info "HOME_NET (pour suricata.yaml): $HOME_NET"
-print_info "Runmode (pour suricata.yaml): $RUNMODE"
-print_info "Build sans cache: $BUILD_NO_CACHE"
-print_info "Exécution en mode détaché: $RUN_DETACHED"
-print_info "Chemin du fichier de config généré: $SURICATA_YAML_HOST_PATH"
+print_info "- Mode Suricata (via env var MODE): $MODE"
+print_info "- Interface Suricata (via env var INTERFACE, si MODE=ids): $INTERFACE"
+print_info "- HOME_NET (dans $SURICATA_YAML_HOST_PATH): $HOME_NET"
+print_info "- Runmode (dans $SURICATA_YAML_HOST_PATH): $RUNMODE"
+print_info "- Build sans cache: $BUILD_NO_CACHE"
+print_info "- Exécution en mode détaché: $RUN_DETACHED"
+print_info "- Fichier de config généré: $SURICATA_YAML_HOST_PATH"
 
 # Demander confirmation
 ask_question "Continuer avec ces paramètres pour construire et lancer avec docker-compose? (o/n)"
