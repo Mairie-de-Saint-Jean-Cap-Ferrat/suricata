@@ -2,9 +2,16 @@ import os
 import socket
 import json
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 
-app = Flask(__name__)
+# Assuming the Flask app is run from the /app/web directory as set in Dockerfile.webinterface
+# We need to serve static files (HTML, CSS, JS) from the 'web' directory relative to the CWD
+# and logs from the mounted 'logs' directory.
+# Flask looks for static files relative to its root_path or a specified static_folder.
+STATIC_FOLDER_PATH = '.' # Serve from the current working directory (/app/web)
+LOGS_FOLDER_PATH = 'logs' # Where logs will be mounted/available
+
+app = Flask(__name__, static_folder=STATIC_FOLDER_PATH, static_url_path='')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -80,6 +87,36 @@ def send_unix_command(command_data):
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
         return {"status": "error", "message": f"An unexpected error occurred: {e}"}
+
+# --- Static File Serving ---
+@app.route('/')
+def index():
+    """Serve the main HTML page."""
+    logger.info(f"Serving index.html from {app.static_folder}")
+    # Flask automatically serves files from static_folder if static_url_path is set
+    # However, explicitly defining a route for '/' to serve index.html is clearer.
+    return send_from_directory(app.static_folder, 'index.html')
+
+# Flask's default static file handling (via static_url_path='') should serve
+# style.css and script.js automatically when requested like <link rel="stylesheet" href="style.css">
+# No need for explicit routes for them if they are in the static_folder.
+
+# --- Log File Serving ---
+@app.route('/logs/<path:filename>')
+def serve_log(filename):
+    """Serve log files (eve.json, suricata.log) from the mounted logs directory."""
+    logs_dir = os.path.join(app.root_path, LOGS_FOLDER_PATH)
+    logger.info(f"Attempting to serve log file: {filename} from {logs_dir}")
+    if not os.path.exists(logs_dir):
+         logger.error(f"Logs directory not found at {logs_dir}")
+         return jsonify({"error": "Logs directory not configured or not found on server."}), 404
+    try:
+        return send_from_directory(logs_dir, filename, mimetype='text/plain')
+    except FileNotFoundError:
+        logger.warning(f"Log file not found: {filename} in {logs_dir}")
+        # Return empty content with 200 OK, as the frontend handles this message.
+        # Returning 404 might be treated as a general fetch error by the frontend.
+        return "", 200 # Or return jsonify({"error": f"Log file '{filename}' not found"}), 404
 
 # --- API Endpoint --- 
 @app.route('/api/command', methods=['POST'])

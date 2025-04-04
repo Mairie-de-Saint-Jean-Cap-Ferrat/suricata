@@ -15,7 +15,8 @@ services:
       - suricata-logs:/var/log/suricata # Volume pour les logs
       # Le volume de config n'est plus monté, il est dans l'image
       # - ./docker/run/etc:/etc/suricata:rw 
-      - suricata-rules:/etc/suricata/rules # Volume pour les règles
+      # Le volume des règles n'est plus nécessaire ici, suricata-update les gère dans /var/lib/suricata/rules
+      # - suricata-rules:/etc/suricata/rules # Volume pour les règles
       - suricata-run:/var/run/suricata # Volume pour le socket et PID
     environment:
       - SURICATA_INTERFACE=eth0 
@@ -30,6 +31,8 @@ services:
       - "5001:5001"
     volumes:
       - suricata-run:/var/run/suricata:ro
+      # Monter le volume des logs de Suricata en lecture seule dans le dossier 'logs' du CWD de l'app Flask
+      - suricata-logs:/app/web/logs:ro
     environment:
       - SURICATA_SOCKET_PATH=/var/run/suricata/suricata-command.socket
     depends_on:
@@ -38,7 +41,7 @@ services:
 
 volumes:
   suricata-logs:
-  suricata-rules:
+  # suricata-rules: # Volume supprimé
   suricata-run:
 
 # networks:
