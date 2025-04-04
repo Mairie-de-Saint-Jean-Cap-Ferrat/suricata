@@ -125,4 +125,125 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     */
 
+    // --- Chart Rendering --- 
+    let topAlertsChartInstance = null; // To hold the chart instance
+
+    const renderTopAlertsChart = (labels, values) => {
+        const ctx = document.getElementById('topAlertsChart')?.getContext('2d');
+        if (!ctx) {
+            console.error("Canvas element for top alerts chart not found!");
+            return;
+        }
+
+        // Destroy previous chart instance if it exists
+        if (topAlertsChartInstance) {
+            topAlertsChartInstance.destroy();
+        }
+
+        topAlertsChartInstance = new Chart(ctx, {
+            type: 'bar', // or 'pie', 'doughnut'
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Nombre d\'occurrences',
+                    data: values,
+                    backgroundColor: [
+                        'rgba(255, 99, 132, 0.5)',
+                        'rgba(54, 162, 235, 0.5)',
+                        'rgba(255, 206, 86, 0.5)',
+                        'rgba(75, 192, 192, 0.5)',
+                        'rgba(153, 102, 255, 0.5)',
+                        'rgba(255, 159, 64, 0.5)',
+                        'rgba(199, 199, 199, 0.5)',
+                        'rgba(83, 102, 255, 0.5)',
+                        'rgba(40, 159, 64, 0.5)',
+                        'rgba(210, 99, 132, 0.5)'
+                    ],
+                    borderColor: [
+                        'rgba(255, 99, 132, 1)',
+                        'rgba(54, 162, 235, 1)',
+                        'rgba(255, 206, 86, 1)',
+                        'rgba(75, 192, 192, 1)',
+                        'rgba(153, 102, 255, 1)',
+                        'rgba(255, 159, 64, 1)',
+                        'rgba(199, 199, 199, 1)',
+                        'rgba(83, 102, 255, 1)',
+                        'rgba(40, 159, 64, 1)',
+                        'rgba(210, 99, 132, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                indexAxis: 'y', // Make it horizontal for better label readability
+                scales: {
+                    x: {
+                        beginAtZero: true
+                    }
+                },
+                responsive: true,
+                maintainAspectRatio: false, // Allow chart to resize within container
+                plugins: {
+                    legend: {
+                        display: false // Hide legend for single dataset
+                    }
+                }
+            }
+        });
+    };
+
+    const fetchTopAlertsChartData = async () => {
+        try {
+            const response = await fetch('/api/stats/top_signatures');
+            if (!response.ok) {
+                 const errorData = await response.json();
+                throw new Error(errorData.error || `Erreur HTTP! status: ${response.status}`);
+            }
+            const data = await response.json();
+            if (data.labels && data.values) {
+                 renderTopAlertsChart(data.labels, data.values);
+            } else {
+                 console.error("Données reçues pour le graphique invalides:", data);
+                 // Afficher un message sur le canvas ?
+                 const ctx = document.getElementById('topAlertsChart')?.getContext('2d');
+                 if (ctx) {
+                     // Optionnel: Nettoyer et afficher un message
+                     if (topAlertsChartInstance) topAlertsChartInstance.destroy();
+                     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                     ctx.font = "16px Arial";
+                     ctx.fillStyle = "grey";
+                     ctx.textAlign = "center";
+                     ctx.fillText("Données indisponibles ou invalides.", ctx.canvas.width/2, ctx.canvas.height/2);
+                 }
+            }
+        } catch (error) {
+            console.error('Erreur lors de la récupération des données du graphique:', error);
+            // Afficher une erreur sur le canvas
+            const ctx = document.getElementById('topAlertsChart')?.getContext('2d');
+            if (ctx) {
+                 if (topAlertsChartInstance) topAlertsChartInstance.destroy();
+                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                 ctx.font = "14px Arial";
+                 ctx.fillStyle = "red";
+                 ctx.textAlign = "center";
+                 ctx.fillText(`Erreur chargement: ${error.message}`, ctx.canvas.width/2, ctx.canvas.height/2, ctx.canvas.width - 20);
+            }
+        }
+    };
+
+    // --- Initial Load --- 
+    fetchLogs(); // Load text logs
+    fetchTopAlertsChartData(); // Load chart data
+
+    // Link chart refresh to log refresh?
+    if (refreshButton) {
+        refreshButton.addEventListener('click', () => {
+            fetchLogs(); // Refresh text logs
+            fetchTopAlertsChartData(); // Refresh chart data as well
+        });
+    } else {
+         // If no refresh button, ensure initial load still happens
+         fetchLogs();
+         fetchTopAlertsChartData();
+    }
 }); 

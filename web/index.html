@@ -25,6 +25,15 @@
          </div>
     </div>
 
+    <h2>Statistiques Visuelles</h2>
+    <div id="charts-container">
+        <div class="chart-box">
+            <h3>Top 10 Signatures d'Alerte</h3>
+            <canvas id="topAlertsChart"></canvas>
+        </div>
+        <!-- D'autres graphiques peuvent être ajoutés ici -->
+    </div>
+
     <h2>Visualisation des Logs Suricata (Statique)</h2>
     <p>Ceci affiche le contenu des fichiers <code>eve.json</code> ou <code>suricata.log</code> s'ils sont présents dans un sous-dossier <code>/logs/</code> relatif à cette page et servis par le serveur web.</p>
     <div id="log-controls">
@@ -34,6 +43,7 @@
         <pre id="log-content">Chargement des logs...</pre>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="script.js"></script>
 </body>
 </html> 

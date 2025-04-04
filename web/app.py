@@ -2,6 +2,7 @@ import os
 import socket
 import json
 import logging
+from collections import Counter
 from flask import Flask, request, jsonify, send_from_directory
 
 # Assuming the Flask app is run from the /app/web directory as set in Dockerfile.webinterface
@@ -10,6 +11,7 @@ from flask import Flask, request, jsonify, send_from_directory
 # Flask looks for static files relative to its root_path or a specified static_folder.
 STATIC_FOLDER_PATH = '.' # Serve from the current working directory (/app/web)
 LOGS_FOLDER_PATH = 'logs' # Where logs will be mounted/available
+EVE_JSON_FILE = 'eve.json' # Nom du fichier log principal
 
 app = Flask(__name__, static_folder=STATIC_FOLDER_PATH, static_url_path='')
 
@@ -111,12 +113,12 @@ def serve_log(filename):
          logger.error(f"Logs directory not found at {logs_dir}")
          return jsonify({"error": "Logs directory not configured or not found on server."}), 404
     try:
-        return send_from_directory(logs_dir, filename, mimetype='text/plain')
+        # Force mimetype pour eve.json pour éviter les problèmes de rendu navigateur
+        mimetype = 'application/json' if filename == EVE_JSON_FILE else 'text/plain'
+        return send_from_directory(logs_dir, filename, mimetype=mimetype)
     except FileNotFoundError:
         logger.warning(f"Log file not found: {filename} in {logs_dir}")
-        # Return empty content with 200 OK, as the frontend handles this message.
-        # Returning 404 might be treated as a general fetch error by the frontend.
-        return "", 200 # Or return jsonify({"error": f"Log file '{filename}' not found"}), 404
+        return "", 200 # Le frontend gère le fichier vide
 
 # --- API Endpoint --- 
 @app.route('/api/command', methods=['POST'])
@@ -138,6 +140,55 @@ def handle_command():
     else:
         # Return the error message from our helper function
         return jsonify({"return": "FAILED", "message": result['message']}), 500
+
+# --- NOUVEL ENDPOINT POUR LES STATISTIQUES ---
+@app.route('/api/stats/top_signatures', methods=['GET'])
+def get_top_signatures():
+    """Reads eve.json and returns the top 10 alert signatures."""
+    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
+    logger.info(f"Attempting to read statistics from: {eve_path}")
+
+    if not os.path.exists(eve_path):
+        logger.error(f"Statistics file not found: {eve_path}")
+        return jsonify({"error": f"{EVE_JSON_FILE} not found in the logs directory."}), 404
+
+    signature_counts = Counter()
+    lines_processed = 0
+    errors_parsing = 0
+
+    try:
+        with open(eve_path, 'r') as f:
+            for line in f:
+                lines_processed += 1
+                try:
+                    event = json.loads(line)
+                    # Vérifier si c'est une alerte et si la signature existe
+                    if event.get('event_type') == 'alert' and 'alert' in event and 'signature' in event['alert']:
+                        signature_counts[event['alert']['signature']] += 1
+                except json.JSONDecodeError:
+                    errors_parsing += 1
+                    # Logger l'erreur peut être trop verbeux, on logue juste à la fin si besoin
+                    continue # Passer à la ligne suivante en cas d'erreur JSON
+
+        if errors_parsing > 0:
+             logger.warning(f"Encountered {errors_parsing} JSON decoding errors while processing {eve_path}.")
+
+        # Obtenir les 10 signatures les plus fréquentes
+        top_10 = signature_counts.most_common(10)
+
+        # Préparer les données pour Chart.js
+        labels = [item[0] for item in top_10]
+        values = [item[1] for item in top_10]
+
+        logger.info(f"Successfully processed {lines_processed} lines from {eve_path}. Found {len(signature_counts)} unique signatures.")
+        return jsonify({"labels": labels, "values": values})
+
+    except FileNotFoundError: # Double check, bien que déjà fait plus haut
+         logger.error(f"File not found error during processing: {eve_path}")
+         return jsonify({"error": f"{EVE_JSON_FILE} not found during processing."}), 404
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while processing statistics: {e}")
+        return jsonify({"error": f"An unexpected error occurred while processing {EVE_JSON_FILE}: {e}"}), 500
 
 if __name__ == '__main__':
     # Make sure to run with a production server like gunicorn or waitress in production
