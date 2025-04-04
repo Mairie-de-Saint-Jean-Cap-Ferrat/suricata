@@ -177,40 +177,6 @@ ask_runmode() {
   esac
 }
 
-# Fonction pour demander si le conteneur doit tourner en mode détaché
-ask_detached() {
-  print_title "MODE DÉTACHÉ (pour docker-compose up)"
-  echo "Exécute les conteneurs en arrière-plan (ajoute l'option '-d' à docker-compose up)."
-  
-  ask_question "Exécuter en mode détaché? (o/n) [défaut: $(if $RUN_DETACHED; then echo oui; else echo non; fi)]: "
-  read -r response
-  
-  if [[ "$response" =~ ^[oOyY]$ ]]; then
-    RUN_DETACHED=true
-    print_info "Mode détaché activé pour docker-compose up"
-  else
-    RUN_DETACHED=false
-    print_info "Mode détaché désactivé pour docker-compose up"
-  fi
-}
-
-# Fonction pour demander si le cache Docker doit être utilisé pour le build
-ask_no_cache() {
-  print_title "UTILISATION DU CACHE (pour docker-compose build)"
-  echo "Désactiver le cache force la reconstruction de toutes les étapes du Dockerfile (ajoute `--no-cache` à docker-compose build)."
-  
-  ask_question "Désactiver le cache Docker pendant le build? (o/n) [défaut: $(if $BUILD_NO_CACHE; then echo oui; else echo non; fi)]: "
-  read -r response
-  
-  if [[ "$response" =~ ^[oOyY]$ ]]; then
-    BUILD_NO_CACHE=true
-    print_info "Cache Docker désactivé pour docker-compose build"
-  else
-    BUILD_NO_CACHE=false
-    print_info "Cache Docker activé pour docker-compose build"
-  fi
-}
-
 # Fonction pour générer suricata.yaml sur l'hôte EN UTILISANT suricata.yaml.in comme modèle
 generate_suricata_yaml() {
   local template_file="${ROOT_DIR}/suricata.yaml.in"
@@ -289,8 +255,6 @@ ask_mode
 ask_interface
 ask_home_net
 ask_runmode
-ask_no_cache
-ask_detached
 
 # Sauvegarder la configuration mise à jour
 save_config
@@ -304,12 +268,11 @@ print_info "- Mode Suricata (via env var MODE): $MODE"
 print_info "- Interface Suricata (via env var INTERFACE, si MODE=ids): $INTERFACE"
 print_info "- HOME_NET (dans $SURICATA_YAML_HOST_PATH): $HOME_NET"
 print_info "- Runmode (dans $SURICATA_YAML_HOST_PATH): $RUNMODE"
-print_info "- Build sans cache: $BUILD_NO_CACHE"
-print_info "- Exécution en mode détaché: $RUN_DETACHED"
 print_info "- Fichier de config généré: $SURICATA_YAML_HOST_PATH"
+print_info "- Utilisation de Tilt pour le développement et le lancement."
 
 # Demander confirmation
-ask_question "Continuer avec ces paramètres pour construire et lancer avec docker-compose? (o/n)"
+ask_question "Continuer avec ces paramètres pour générer la config et lancer avec Tilt? (o/n)"
 read -r confirm
 if [[ ! "$confirm" =~ ^[oOyY]$ ]]; then
   print_warning "Opération annulée"
@@ -328,61 +291,45 @@ if [ ! -f "$DOCKER_COMPOSE_FILE" ]; then
   exit 1
 fi
 
-# Construire les images Docker via docker-compose
-print_title "CONSTRUCTION DES IMAGES DOCKER VIA DOCKER-COMPOSE"
-print_info "Exécution de la commande docker-compose build..."
-
-COMPOSE_BUILD_ARGS=""
-if [ "$BUILD_NO_CACHE" = true ]; then
-  COMPOSE_BUILD_ARGS="--no-cache"
+# Vérifier si le fichier Tiltfile existe
+if [ ! -f "${ROOT_DIR}/Tiltfile" ]; then
+  print_error "Erreur: Fichier Tiltfile non trouvé à la racine du projet."
+  exit 1
 fi
 
-docker-compose -f "$DOCKER_COMPOSE_FILE" build $COMPOSE_BUILD_ARGS
-
-# Vérifier si la construction a réussi
-if [ $? -eq 0 ]; then
-  print_title "CONSTRUCTION RÉUSSIE"
-  print_info "Les images Docker définies dans docker-compose.yml ont été construites avec succès."
-  echo ""
-
-  # Préparer la commande d'exécution docker-compose up
-  COMPOSE_UP_ARGS=""
-  if [ "$RUN_DETACHED" = true ]; then
-    COMPOSE_UP_ARGS="-d"
-  fi
-
-  # La configuration est maintenant dans suricata.yaml et gérée par docker-compose.yml
-  # Les variables MODE et INTERFACE sont passées via l'environnement dans docker-compose.yml
-  # Si elles n'y sont pas, il faudrait les injecter ici :
-  # export MODE=$MODE
-  # export INTERFACE=$INTERFACE
-  # (Mais docker-compose.yml les a déjà définies pour le service suricata)
-
-  DOCKER_COMPOSE_UP_CMD="docker-compose -f \"$DOCKER_COMPOSE_FILE\" up $COMPOSE_UP_ARGS"
-
-  # Afficher la commande d'exécution
-  echo "Pour exécuter les services avec les paramètres actuels:"
-  echo "(Assurez-vous que les variables d'environnement MODE et INTERFACE sont bien gérées par docker-compose.yml ou exportées)"
-  echo "(Assurez-vous que le fichier $SURICATA_YAML_HOST_PATH existe et est correctement référencé dans docker-compose.yml)"
-  echo "$DOCKER_COMPOSE_UP_CMD"
-  echo ""
-  echo "Commandes utiles (une fois lancé):"
-  echo "- Voir les logs des services: docker-compose -f \"$DOCKER_COMPOSE_FILE\" logs -f"
-  echo "- Voir les logs d'un service spécifique: docker-compose -f \"$DOCKER_COMPOSE_FILE\" logs -f suricata"
-  echo "- Arrêter les services: docker-compose -f \"$DOCKER_COMPOSE_FILE\" down"
-  echo "- Arrêter et supprimer les volumes: docker-compose -f \"$DOCKER_COMPOSE_FILE\" down -v"
-  echo "- Accéder à l'interface web: http://localhost:5001 (ou l'IP de votre hôte Docker)"
-  echo ""
-
-  # Demander à l'utilisateur s'il souhaite exécuter maintenant
-  ask_question "Voulez-vous lancer les services avec docker-compose up maintenant? (o/n)"
-  read -r response
-  if [[ "$response" =~ ^[oOyY]$ ]]; then
-    print_info "Lancement des services via docker-compose up..."
-    eval $DOCKER_COMPOSE_UP_CMD
-  fi
-else
-  print_error "La construction via docker-compose build a échoué."
+# Vérifier si Tilt est installé
+if ! command -v tilt &> /dev/null; then
+  print_error "Erreur: Tilt n'est pas installé ou n'est pas dans le PATH."
+  print_info "Installation: https://docs.tilt.dev/install.html"
   exit 1
+fi
+
+print_title "LANCEMENT AVEC TILT"
+print_info "Tilt va maintenant prendre en charge le build, le lancement et le live-reloading."
+
+# La configuration est maintenant dans suricata.yaml et gérée par docker-compose.yml (lu par Tilt)
+# Les variables MODE et INTERFACE sont passées via l'environnement dans docker-compose.yml
+# Tilt les utilisera lors du lancement des conteneurs.
+
+# Afficher la commande d'exécution
+echo "Pour exécuter les services avec Tilt (interface web et live-reloading):"
+echo "(Assurez-vous que le fichier $SURICATA_YAML_HOST_PATH existe)"
+echo "tilt up"
+
+echo ""
+echo "Commandes utiles (une fois Tilt lancé):"
+echo "- Interface web Tilt: Généralement http://localhost:10350 (vérifier la sortie de Tilt)"
+echo "- Logs des services visibles dans l'interface Tilt."
+echo "- Arrêter Tilt et les services: Ctrl+C dans le terminal où 'tilt up' est lancé."
+echo "- Pour arrêter et supprimer les volumes (après arrêt de Tilt): docker-compose -f \"$DOCKER_COMPOSE_FILE\" down -v"
+echo "- Accéder à l'interface web Suricata: http://localhost:5001 (ou l'IP de votre hôte Docker)"
+echo ""
+
+# Demander à l'utilisateur s'il souhaite exécuter maintenant
+ask_question "Voulez-vous lancer les services avec 'tilt up' maintenant? (o/n)"
+read -r response
+if [[ "$response" =~ ^[oOyY]$ ]]; then
+  print_info "Lancement de 'tilt up'... (Appuyez sur Ctrl+C pour arrêter)"
+  tilt up
 fi
 
