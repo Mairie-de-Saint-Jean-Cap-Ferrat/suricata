@@ -3,8 +3,9 @@ import socket
 import json
 import logging
 import subprocess # AJOUT pour exécuter des commandes externes
+import time # AJOUT pour SSE
 from collections import Counter, deque # AJOUT: deque pour lire les dernières lignes efficacement
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response # AJOUT Response pour SSE
 
 # Assuming the Flask app is run from the /app/web directory as set in Dockerfile.webinterface
 # We need to serve static files (HTML, CSS, JS) from the 'web' directory relative to the CWD
@@ -254,6 +255,82 @@ def run_suricata_update():
         logger.error(f"An unexpected error occurred while running suricata-update: {e}")
         return jsonify({"status": "error", "message": f"An unexpected error occurred: {e}"}), 500
 
+# --- ENDPOINT POUR LE STREAMING DES LOGS (SSE) --- 
+@app.route('/api/logs/stream')
+def stream_logs():
+    """Endpoint SSE pour streamer les nouvelles lignes d'eve.json."""
+    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
+    logger.info(f"Starting log stream for {eve_path}")
+
+    if not os.path.exists(eve_path):
+        logger.error(f"Cannot start stream: Log file not found at {eve_path}")
+        # On ne peut pas vraiment renvoyer une erreur standard ici car c'est un stream
+        # Le client devra gérer l'échec de connexion
+        def error_generator():
+             yield f"data: {json.dumps({'error': 'Log file not found'})}\n\n"
+        return Response(error_generator(), mimetype='text/event-stream')
+
+    def generate():
+        # Utiliser tail -f pour suivre le fichier. '-n 0' pour ne pas envoyer l'historique.
+        # On lit depuis la fin du fichier.
+        try:
+            # D'abord, positionner à la fin
+            with open(eve_path, 'r') as f:
+                 f.seek(0, os.SEEK_END)
+                 # logger.info("Positioned at the end of the log file.")
+            
+            # Lancer tail -f --follow=name --retry pour gérer la rotation
+            # Le conteneur doit avoir `tail` (normalement présent dans les images debian/python slim)
+            proc = subprocess.Popen([
+                    'tail', '-n', '0', '--follow=name', '--retry', eve_path
+                 ], 
+                 stdout=subprocess.PIPE, 
+                 stderr=subprocess.PIPE, 
+                 text=True)
+            
+            logger.info(f"tail -f process started for {eve_path}")
+            
+            while True:
+                 line = proc.stdout.readline()
+                 if not line:
+                      # Vérifier si le processus tail a terminé (peut arriver en cas d'erreur)
+                      poll_status = proc.poll()
+                      if poll_status is not None:
+                          stderr_output = proc.stderr.read()
+                          logger.error(f"tail process exited with code {poll_status}. Stderr: {stderr_output}")
+                          yield f"data: {json.dumps({'error': f'Log stream failed. Tail process exited (code {poll_status}).'})}\n\n"
+                          break # Sortir de la boucle while
+                      # Si pas de ligne mais processus tourne toujours, juste attendre
+                      # time.sleep(0.1)
+                      continue 
+                 
+                 # Envoyer la ligne au client au format SSE
+                 # Tenter de valider/parser le JSON avant de l'envoyer?
+                 try:
+                     json.loads(line) # Juste pour valider
+                     yield f"data: {line.strip()}\n\n"
+                 except json.JSONDecodeError:
+                     logger.warning(f"Streaming non-JSON line: {line.strip()}")
+                     # Envoyer quand même? Ou seulement les lignes JSON valides?
+                     # Pour l'instant, on envoie tout ce que tail sort.
+                     yield f"data: {json.dumps({'raw_line': line.strip()})}\n\n" 
+                 
+        except Exception as e:
+             logger.error(f"Error during log streaming: {e}", exc_info=True)
+             yield f"data: {json.dumps({'error': f'Log stream encountered an error: {e}'})}\n\n"
+        finally:
+            if 'proc' in locals() and proc.poll() is None:
+                 logger.info("Terminating tail process.")
+                 proc.terminate()
+                 try:
+                     proc.wait(timeout=2)
+                 except subprocess.TimeoutExpired:
+                     proc.kill()
+            logger.info("Log stream stopped.")
+            
+    # Renvoyer la réponse avec le générateur et le bon mimetype
+    return Response(generate(), mimetype='text/event-stream')
+
 # --- ENDPOINTS POUR LES STATISTIQUES (Mis à jour et Nouveaux) --- 
 
 def parse_eve_json_lines(filepath, max_lines=2000, event_filter=None):
@@ -392,6 +469,46 @@ def get_top_tls_sni():
 
     logger.info(f"Found {len(sni_counts)} unique TLS SNIs in recent lines.")
     return jsonify({"labels": labels, "values": values})
+
+# --- NOUVEL ENDPOINT POUR L'HISTORIQUE DES PAQUETS --- 
+@app.route('/api/stats/capture_history', methods=['GET'])
+def get_capture_history():
+    """Récupère l'historique récent des paquets capturés/perdus à partir des événements stats."""
+    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
+    logger.info(f"Attempting to read capture history from: {eve_path}")
+
+    # Lire un nombre suffisant de lignes pour avoir plusieurs points de stats
+    # Ajuster max_lines en fonction de la fréquence des stats (souvent toutes les 8-10s)
+    # 500 lignes -> ~40-50 points de stats si log toutes les 10s ?
+    events = parse_eve_json_lines(eve_path, max_lines=500, event_filter='stats')
+
+    if not events:
+        logger.warning("No 'stats' events found for capture history.")
+        return jsonify({"timestamps": [], "packets": [], "drops": []})
+
+    timestamps = []
+    packets = []
+    drops = []
+
+    for event in events:
+        stats_data = event.get('stats', {})
+        capture_data = stats_data.get('capture', {})
+        timestamp = event.get("timestamp")
+        # Utiliser kernel_packets/kernel_drops ou le total pkts/drop ?
+        # kernel_* semble plus spécifique à l'interface de capture
+        pkt_count = capture_data.get('kernel_packets') 
+        drop_count = capture_data.get('kernel_drops')
+
+        # On a besoin du timestamp et des compteurs pour ajouter un point
+        if timestamp is not None and pkt_count is not None and drop_count is not None:
+            # Convertir le timestamp ISO en quelque chose que Chart.js time adapter comprend
+            # Le format ISO 8601 est généralement bien géré par les adapters
+            timestamps.append(timestamp)
+            packets.append(pkt_count)
+            drops.append(drop_count)
+
+    logger.info(f"Returning capture history with {len(timestamps)} data points.")
+    return jsonify({"timestamps": timestamps, "packets": packets, "drops": drops})
 
 if __name__ == '__main__':
     # Make sure to run with a production server like gunicorn or waitress in production

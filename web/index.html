@@ -102,11 +102,11 @@
                              <canvas id="appLayerProtoChart"></canvas>
                          </div>
 
-                         <!-- NOUVEAU: Paquets Reçus/Perdus (Graphique temporel - plus complexe, peut être ajouté plus tard) -->
-                         <!-- <div class="col-12 mb-4 chart-box" style="min-height: 300px;">
+                         <!-- NOUVEAU: Paquets Reçus/Perdus (Graphique temporel) -->
+                         <div class="col-12 mb-4 chart-box" style="height: 350px;"> <!-- Hauteur spécifique pour ce graph -->
                              <h5 class="card-title">Paquets Reçus vs Perdus (Historique récent)</h5>
-                             <canvas id="captureStatsChart"></canvas>
-                         </div> -->
+                             <canvas id="captureHistoryChart"></canvas>
+                         </div>
 
                      </div>
                      <div class="card-footer text-end">
@@ -164,6 +164,24 @@ re:heartbleed"></textarea>
             </div>
         </div>
 
+        <!-- AJOUT: Section Logs en direct -->
+        <div class="row mt-4">
+             <div class="col-12">
+                 <div class="card">
+                     <div class="card-header d-flex justify-content-between align-items-center">
+                         Logs en Temps Réel (eve.json)
+                         <span id="log-stream-status" class="badge bg-secondary">Déconnecté</span>
+                     </div>
+                     <div class="card-body">
+                         <p class="card-text small text-muted">Affiche les nouvelles lignes du fichier <code>eve.json</code> au fur et à mesure.</p>
+                         <div id="live-log-container" style="height: 400px; overflow-y: scroll; background-color: #212529; color: #f8f9fa; padding: 1rem; font-family: var(--bs-font-monospace); font-size: 0.85em;">
+                             <pre id="live-log-content">Connexion au flux de logs...</pre>
+                         </div>
+                     </div>
+                 </div>
+             </div>
+        </div>
+
         <footer class="text-center text-muted mt-5 mb-3">
             Suricata Interface - 2025
         </footer>
@@ -171,6 +189,9 @@ re:heartbleed"></textarea>
 
     <!-- Bootstrap Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Chart.js Adapters (Luxon) -->
+    <script src="https://cdn.jsdelivr.net/npm/luxon@^2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@^1"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Custom Script -->

@@ -11,6 +11,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const reloadStatusDiv = document.getElementById('reload-status');
     const updateOutputPre = document.getElementById('update-output');
 
+    // AJOUT: Éléments pour les logs en direct et graphique temporel
+    const liveLogContent = document.getElementById('live-log-content');
+    const logStreamStatus = document.getElementById('log-stream-status');
+    let eventSource = null; // Pour stocker l'instance EventSource
+    const MAX_LOG_LINES = 500; // Limiter le nombre de lignes dans le log en direct
+    let currentLogLines = [];
+
     // Map pour stocker les instances de Chart.js
     const chartInstances = {};
 
@@ -83,6 +90,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const pieChartOptions = { 
          ...defaultChartOptions, 
          plugins: { legend: { position: 'right' } }
+    };
+
+    const timeSeriesLineOptions = {
+        ...defaultChartOptions,
+        scales: {
+            x: {
+                type: 'time',
+                time: {
+                    unit: 'minute', // Ajuster l'unité selon la densité des données
+                     tooltipFormat: 'HH:mm:ss', // Format pour le tooltip
+                     displayFormats: {
+                          minute: 'HH:mm' // Format affiché sur l'axe
+                     }
+                },
+                title: {
+                    display: true,
+                    text: 'Temps'
+                }
+            },
+            y: {
+                beginAtZero: true,
+                title: {
+                    display: true,
+                    text: 'Nombre'
+                }
+            }
+        }
     };
 
     // --- NOUVEAU: Fonctions pour récupérer les données et rendre chaque graphique ---
@@ -230,6 +264,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
+    const fetchAndRenderCaptureHistory = async () => {
+        try {
+            const response = await fetch('/api/stats/capture_history');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const apiData = await response.json();
+            
+            // Formatter les données pour Chart.js time series
+            const packetsData = apiData.timestamps.map((ts, index) => ({
+                x: ts, // Luxon devrait pouvoir parser l'ISO 8601
+                y: apiData.packets[index]
+            }));
+            const dropsData = apiData.timestamps.map((ts, index) => ({
+                x: ts,
+                y: apiData.drops[index]
+            }));
+
+            renderChart('captureHistoryChart', 'line', 
+                 {
+                    // Les labels ne sont pas nécessaires quand l'axe X est temporel et les données sont des {x, y}
+                    datasets: [
+                        {
+                             label: 'Paquets Reçus',
+                             data: packetsData,
+                             borderColor: 'rgb(75, 192, 192)',
+                             backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                             tension: 0.1, // Légère courbe
+                             fill: false
+                        },
+                        {
+                             label: 'Paquets Perdus',
+                             data: dropsData,
+                             borderColor: 'rgb(255, 99, 132)',
+                             backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                             tension: 0.1,
+                             fill: false
+                        }
+                    ]
+                 },
+                 timeSeriesLineOptions, // Utiliser les options spécifiques pour le temps
+                 "Paquets Reçus vs Perdus"
+            );
+        } catch (error) {
+            console.error('Error fetching/rendering Capture History:', error);
+            renderChart('captureHistoryChart', 'line', null, timeSeriesLineOptions, "Paquets Reçus vs Perdus");
+        }
+    };
+
     // --- Fonction pour charger toutes les données des graphiques ---
     const loadAllChartData = () => {
         console.log('Loading all chart data...');
@@ -237,7 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchAndRenderTopDns();
         fetchAndRenderTopTlsSni();
         fetchAndRenderProtoCharts();
-        // Ajouter fetch pour captureStatsChart ici si implémenté
+        fetchAndRenderCaptureHistory(); // AJOUT: Charger le graphique temporel
     };
 
     // --- Config File Fetching & Saving ---
@@ -265,6 +346,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAllChartData(); // Charger tous les graphiques
     fetchConfigFile('enable.conf', enableConfTextarea);
     fetchConfigFile('disable.conf', disableConfTextarea);
+    connectLogStream(); // Démarrer le flux de logs
 
     if (refreshChartsButton) {
         refreshChartsButton.addEventListener('click', loadAllChartData); // Rafraîchir tous les graphiques
@@ -489,4 +571,81 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // --- NOUVEAU: Log Streaming (SSE) ---
+    const connectLogStream = () => {
+        if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+             console.log("Log stream already open.");
+             return;
+        }
+
+        console.log("Connecting to log stream...");
+        eventSource = new EventSource('/api/logs/stream');
+        currentLogLines = ["Connexion au flux de logs..."]; // Reset log display
+        liveLogContent.textContent = currentLogLines.join('\n');
+
+        eventSource.onopen = () => {
+            console.log("Log stream connected.");
+            logStreamStatus.textContent = 'Connecté';
+            logStreamStatus.className = 'badge bg-success';
+            currentLogLines = ["Connecté au flux..."]; // Clear initial message
+            liveLogContent.textContent = currentLogLines.join('\n');
+        };
+
+        eventSource.onmessage = (event) => {
+            // console.log("Raw SSE data:", event.data);
+            let logEntry;
+            try {
+                logEntry = JSON.parse(event.data);
+            } catch (e) {
+                console.error("Failed to parse SSE data:", event.data, e);
+                logEntry = { error: "Invalid data received from stream", raw: event.data };
+            }
+
+            // Formatter le message (simple pour l'instant)
+            let formattedLog = event.data; // Afficher le JSON brut par défaut
+            if (logEntry.error) {
+                 formattedLog = `ERREUR STREAM: ${logEntry.error}${logEntry.raw ? ' - ' + logEntry.raw : ''}`;
+            } else if (logEntry.raw_line) {
+                 formattedLog = `[RAW] ${logEntry.raw_line}`;
+            } // Pas de formatage spécifique pour les JSON valides pour l'instant
+
+            // Ajouter la ligne et limiter la taille
+            currentLogLines.push(formattedLog);
+            if (currentLogLines.length > MAX_LOG_LINES) {
+                currentLogLines.shift(); // Supprimer la plus ancienne
+            }
+            liveLogContent.textContent = currentLogLines.join('\n');
+
+            // Faire défiler vers le bas
+            const container = document.getElementById('live-log-container');
+            if (container) {
+                 // Auto-scroll seulement si l'utilisateur est déjà en bas (ou proche)
+                 const isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 30; // Marge de 30px
+                 if (isScrolledToBottom) {
+                     container.scrollTop = container.scrollHeight;
+                 }
+            }
+
+             // Déclencher une mise à jour des graphiques si un événement 'stats' arrive ? (Optionnel, peut être coûteux)
+             /*
+             if (logEntry.event_type === 'stats') {
+                 console.log('Stats event received via SSE, refreshing charts...');
+                 loadAllChartData(); 
+             }
+             */
+        };
+
+        eventSource.onerror = (error) => {
+            console.error("Log stream error:", error);
+            logStreamStatus.textContent = 'Erreur';
+            logStreamStatus.className = 'badge bg-danger';
+            currentLogLines.push("ERREUR: Connexion au flux de logs perdue ou impossible.");
+            if (currentLogLines.length > MAX_LOG_LINES) {
+                 currentLogLines.shift();
+             }
+             liveLogContent.textContent = currentLogLines.join('\n');
+            eventSource.close(); // Fermer pour éviter les tentatives de reconnexion infinies?
+        };
+    };
 }); 
