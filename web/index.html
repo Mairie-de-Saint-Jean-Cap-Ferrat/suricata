@@ -41,115 +41,134 @@
             <!-- Peut-être ajouter un indicateur de statut global ici -->
         </header>
 
-        <div class="row">
-            <!-- Colonne pour les Contrôles -->
-            <div class="col-md-4 mb-4">
-                <div class="card">
-                    <div class="card-header">
-                        Contrôles Suricata
-                    </div>
-                    <div class="card-body" id="controls">
-                        <p class="card-text small text-muted">Envoyer des commandes via l'API backend.</p>
-                        <div class="d-grid gap-2 mb-3">
-                             <button id="reload-btn" class="btn btn-primary">Recharger les Règles</button>
-                             <button id="uptime-btn" class="btn btn-info">Uptime</button>
-                             <button id="iface-list-btn" class="btn btn-secondary">Lister Interfaces</button>
-                             <button id="shutdown-btn" class="btn btn-danger">Arrêter Suricata</button>
-                        </div>
-                        <p class="small text-warning">
-                             <em>Note: L'arrêt via ce bouton peut nécessiter un redémarrage manuel du service.</em>
-                        </p>
-                        <div id="command-status" class="alert alert-info mt-3" role="alert">
-                            Statut : <span id="status-message">Prêt</span>
-                        </div>
-                    </div>
-                </div>
+        <!-- Navigation par Onglets -->
+        <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="controls-tab" data-bs-toggle="tab" data-bs-target="#controls-pane" type="button" role="tab" aria-controls="controls-pane" aria-selected="true">Contrôles</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats-pane" type="button" role="tab" aria-controls="stats-pane" aria-selected="false">Statistiques</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="config-tab" data-bs-toggle="tab" data-bs-target="#config-pane" type="button" role="tab" aria-controls="config-pane" aria-selected="false">Configuration Règles</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                 <button class="nav-link" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs-pane" type="button" role="tab" aria-controls="logs-pane" aria-selected="false">Logs en Direct</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                 <button class="nav-link" id="main-config-tab" data-bs-toggle="tab" data-bs-target="#main-config-pane" type="button" role="tab" aria-controls="main-config-pane" aria-selected="false">Config Suricata</button>
+            </li>
+        </ul>
+
+        <!-- Contenu des Onglets -->
+        <div class="tab-content" id="mainTabsContent">
+
+            <!-- Onglet Contrôles -->
+            <div class="tab-pane fade show active" id="controls-pane" role="tabpanel" aria-labelledby="controls-tab">
+                 <div class="row">
+                     <!-- Colonne pour les Contrôles Suricata -->
+                     <div class="col-md-6 mb-4">
+                         <div class="card">
+                             <div class="card-header">
+                                 Contrôles Suricata
+                             </div>
+                             <div class="card-body" id="controls">
+                                 <p class="card-text small text-muted">Envoyer des commandes via l'API backend.</p>
+                                 <div class="d-grid gap-2 mb-3">
+                                     <button id="reload-btn" class="btn btn-primary">Recharger les Règles</button>
+                                     <button id="uptime-btn" class="btn btn-info">Uptime</button>
+                                     <button id="iface-list-btn" class="btn btn-secondary">Lister Interfaces</button>
+                                     <button id="shutdown-btn" class="btn btn-danger">Arrêter Suricata</button>
+                                 </div>
+                                 <p class="small text-warning">
+                                     <em>Note: L'arrêt via ce bouton peut nécessiter un redémarrage manuel du service.</em>
+                                 </p>
+                             </div>
+                         </div>
+                     </div>
+                      <!-- Colonne pour le Statut des commandes -->
+                     <div class="col-md-6 mb-4">
+                         <div class="card">
+                            <div class="card-header">Statut Commande</div>
+                            <div class="card-body">
+                                <div id="command-status" class="alert alert-info mt-3" role="alert">
+                                     Statut : <span id="status-message">Prêt</span>
+                                </div>
+                            </div>
+                         </div>
+                     </div>
+                 </div>
             </div>
 
-            <!-- Colonne pour les Graphiques -->
-            <div class="col-md-8 mb-4">
+            <!-- Onglet Statistiques -->
+            <div class="tab-pane fade" id="stats-pane" role="tabpanel" aria-labelledby="stats-tab">
                  <div class="card">
-                     <div class="card-header">
+                     <div class="card-header d-flex justify-content-between align-items-center">
                          Statistiques Visuelles
+                         <button id="refresh-charts" class="btn btn-sm btn-outline-secondary">Rafraîchir Graphiques</button>
                      </div>
                      <div class="card-body row" id="charts-container">
+                         <!-- Les divs chart-box sont déjà là -->
                          <div class="col-md-6 mb-4 chart-box">
-                              <h5 class="card-title">Top 10 Signatures d'Alerte</h5>
-                              <canvas id="topAlertsChart"></canvas>
-                          </div>
-
-                         <!-- NOUVEAU: Top DNS Queries -->
+                             <h5 class="card-title">Top 10 Signatures d'Alerte</h5>
+                             <canvas id="topAlertsChart"></canvas>
+                         </div>
                          <div class="col-md-6 mb-4 chart-box">
                             <h5 class="card-title">Top 10 Requêtes DNS</h5>
                             <canvas id="topDnsChart"></canvas>
                          </div>
-
-                         <!-- NOUVEAU: Top TLS SNI -->
                          <div class="col-md-6 mb-4 chart-box">
                             <h5 class="card-title">Top 10 TLS SNI</h5>
                             <canvas id="topTlsSniChart"></canvas>
                          </div>
-
-                         <!-- NOUVEAU: Protocoles L3/L4 (Decoder) -->
                          <div class="col-md-6 mb-4 chart-box">
                              <h5 class="card-title">Répartition Protocoles L3/L4 (Decodeur)</h5>
                              <canvas id="decoderProtoChart"></canvas>
                          </div>
-
-                         <!-- NOUVEAU: Protocoles Applicatifs (Flow) -->
                          <div class="col-md-6 mb-4 chart-box">
                              <h5 class="card-title">Répartition Protocoles Applicatifs (Flow)</h5>
                              <canvas id="appLayerProtoChart"></canvas>
                          </div>
-
-                         <!-- NOUVEAU: Paquets Reçus/Perdus (Graphique temporel) -->
-                         <div class="col-12 mb-4 chart-box" style="height: 350px;"> <!-- Hauteur spécifique pour ce graph -->
+                         <div class="col-12 mb-4 chart-box" style="height: 350px;">
                              <h5 class="card-title">Paquets Reçus vs Perdus (Historique récent)</h5>
                              <canvas id="captureHistoryChart"></canvas>
                          </div>
-
                      </div>
-                     <div class="card-footer text-end">
-                         <button id="refresh-charts" class="btn btn-sm btn-outline-secondary">Rafraîchir Graphiques</button>
-                     </div>
+                     <!-- Le footer a été déplacé en bas de la page -->
                  </div>
             </div>
-        </div>
 
-        <!-- AJOUT: Section Configuration des Règles -->
-        <div class="row">
-            <div class="col-12 mb-4">
-                <div class="card">
-                    <div class="card-header">
-                        Configuration des Règles (enable.conf / disable.conf)
-                    </div>
-                    <div class="card-body">
+            <!-- Onglet Configuration Règles -->
+            <div class="tab-pane fade" id="config-pane" role="tabpanel" aria-labelledby="config-tab">
+                 <div class="card">
+                     <div class="card-header">
+                         Configuration des Règles (enable.conf / disable.conf)
+                     </div>
+                     <div class="card-body">
                          <p class="card-text small text-muted">
                              Modifiez les fichiers pour activer/désactiver des règles spécifiques par SID, groupe ou regex.
                              Voir la <a href="https://docs.suricata.io/en/latest/rule-management/suricata-update.html#controlling-which-rules-are-used" target="_blank" rel="noopener noreferrer">documentation Suricata-Update</a> pour la syntaxe.
                          </p>
                          <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="enable-conf-content" class="form-label"><code>enable.conf</code> (Activer des règles)</label>
-                                <textarea class="form-control" id="enable-conf-content" rows="10" placeholder="Exemple:
+                             <div class="col-md-6 mb-3">
+                                 <label for="enable-conf-content" class="form-label"><code>enable.conf</code> (Activer des règles)</label>
+                                 <textarea class="form-control" id="enable-conf-content" rows="10" placeholder="Exemple:
 2019401
 group:emerging-icmp.rules
 re:trojan"></textarea>
-                                <div class="form-text">Activer des signatures spécifiques, des groupes ou via regex.</div>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="disable-conf-content" class="form-label"><code>disable.conf</code> (Désactiver des règles)</label>
-                                <textarea class="form-control" id="disable-conf-content" rows="10" placeholder="Exemple:
+                                 <div class="form-text">Activer des signatures spécifiques, des groupes ou via regex.</div>
+                             </div>
+                             <div class="col-md-6 mb-3">
+                                 <label for="disable-conf-content" class="form-label"><code>disable.conf</code> (Désactiver des règles)</label>
+                                 <textarea class="form-control" id="disable-conf-content" rows="10" placeholder="Exemple:
 2019401
 group:emerging-info.rules
 re:heartbleed"></textarea>
-                                <div class="form-text">Désactiver des signatures spécifiques, des groupes ou via regex.</div>
-                            </div>
-                        </div>
-                        <button id="save-config-btn" class="btn btn-success">Sauvegarder et Appliquer les Règles</button> 
+                                 <div class="form-text">Désactiver des signatures spécifiques, des groupes ou via regex.</div>
+                             </div>
+                         </div>
+                         <button id="save-config-btn" class="btn btn-success">Sauvegarder et Appliquer les Règles</button> 
                          <span id="config-status-message" class="ms-3"></span>
-                         
-                         <!-- Zone pour l'étape post-sauvegarde (simplifiée) -->
                          <div id="post-save-status" class="mt-4" style="display: none;">
                              <div id="update-status" class="alert alert-info" role="alert">
                                  Exécution de <code>suricata-update</code>...
@@ -159,32 +178,69 @@ re:heartbleed"></textarea>
                              </div>
                              <pre id="update-output" class="bg-dark text-light p-2 rounded small" style="max-height: 200px; overflow-y: auto; display:none;"></pre>
                          </div>
-                    </div>
-                </div>
+                     </div>
+                 </div>
             </div>
-        </div>
-
-        <!-- AJOUT: Section Logs en direct -->
-        <div class="row mt-4">
-             <div class="col-12">
+            
+             <!-- Onglet Logs en Direct -->
+             <div class="tab-pane fade" id="logs-pane" role="tabpanel" aria-labelledby="logs-tab">
                  <div class="card">
                      <div class="card-header d-flex justify-content-between align-items-center">
-                         Logs en Temps Réel (eve.json)
+                         <span>Logs en Temps Réel : <strong id="current-logfile">eve.json</strong></span>
+                         <div>
+                             <button class="btn btn-sm btn-outline-light me-2" data-logfile="eve.json" id="select-eve-btn">eve.json</button>
+                             <button class="btn btn-sm btn-outline-secondary" data-logfile="suricata.log" id="select-suricata-btn">suricata.log</button>
+                         </div>
                          <span id="log-stream-status" class="badge bg-secondary">Déconnecté</span>
                      </div>
                      <div class="card-body">
-                         <p class="card-text small text-muted">Affiche les nouvelles lignes du fichier <code>eve.json</code> au fur et à mesure.</p>
+                         <p class="card-text small text-muted">Sélectionnez le fichier log à afficher en temps réel.</p>
                          <div id="live-log-container" style="height: 400px; overflow-y: scroll; background-color: #212529; color: #f8f9fa; padding: 1rem; font-family: var(--bs-font-monospace); font-size: 0.85em;">
-                             <pre id="live-log-content">Connexion au flux de logs...</pre>
+                             <pre id="live-log-content">Sélectionnez un fichier log ci-dessus...</pre>
                          </div>
                      </div>
                  </div>
              </div>
-        </div>
+             
+            <!-- Onglet Configuration Suricata -->
+            <div class="tab-pane fade" id="main-config-pane" role="tabpanel" aria-labelledby="main-config-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Configuration Principale (suricata.yaml)
+                    </div>
+                    <div class="card-body">
+                         <div class="alert alert-danger" role="alert">
+                            <strong>AVERTISSEMENT MAJEUR :</strong> La modification de ce fichier peut rendre Suricata inutilisable. Sauvegardez uniquement si vous êtes sûr de la syntaxe et des paramètres. Les changements nécessitent une reconstruction de l'image Docker et un redémarrage manuel du service Suricata via le terminal.
+                        </div>
+                        <div class="mb-3">
+                             <label for="suricata-yaml-content" class="form-label">Contenu de <code>suricata.yaml</code></label>
+                             <textarea class="form-control" id="suricata-yaml-content" rows="25" spellcheck="false" style="font-family: var(--bs-font-monospace); font-size: 0.85em;"></textarea>
+                        </div>
+                        <button id="save-main-config-btn" class="btn btn-warning">Sauvegarder suricata.yaml (Risqué)</button>
+                        <span id="main-config-status-message" class="ms-3"></span>
+                         <div id="post-save-main-config-info" class="mt-3 p-3 border rounded bg-light" style="display: none;">
+                             <p class="fw-bold">Fichier sauvegardé.</p>
+                             <p>Pour appliquer les changements :</p>
+                             <ol>
+                                 <li>Ouvrez votre terminal.</li>
+                                 <li>Exécutez : <code>docker compose build suricata</code></li>
+                                 <li>Puis exécutez : <code>docker compose up -d --force-recreate suricata</code></li>
+                             </ol>
+                         </div>
+                    </div>
+                </div>
+            </div>
+             
+        </div> <!-- Fin de .tab-content -->
 
-        <footer class="text-center text-muted mt-5 mb-3">
-            Suricata Interface - 2025
-        </footer>
+        <!-- Suppression des anciennes sections qui sont maintenant dans les onglets -->
+        <!-- <div class="row">
+# ... existing code ...
+         <footer class="text-center text-muted mt-5 mb-3">
+             Suricata Interface - 2025
+         </footer>
+# ... existing code ...
+
     </div>
 
     <!-- Bootstrap Bundle with Popper -->

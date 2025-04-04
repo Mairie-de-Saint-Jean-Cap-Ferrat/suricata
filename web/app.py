@@ -180,8 +180,10 @@ def write_config_file(filename, content):
 
 @app.route('/api/config/<filename>', methods=['GET'])
 def get_config_file(filename):
-    """Get the content of enable.conf or disable.conf."""
-    if filename not in ('enable.conf', 'disable.conf'):
+    """Get the content of enable.conf, disable.conf or suricata.yaml."""
+    # AJOUT: Autoriser suricata.yaml
+    allowed_files = ('enable.conf', 'disable.conf', 'suricata.yaml')
+    if filename not in allowed_files:
         return jsonify({"error": "Invalid config filename specified."}), 400
     try:
         content = read_config_file(filename)
@@ -191,8 +193,10 @@ def get_config_file(filename):
 
 @app.route('/api/config/<filename>', methods=['POST'])
 def save_config_file(filename):
-    """Save content to enable.conf or disable.conf."""
-    if filename not in ('enable.conf', 'disable.conf'):
+    """Save content to enable.conf, disable.conf or suricata.yaml."""
+    # AJOUT: Autoriser suricata.yaml
+    allowed_files = ('enable.conf', 'disable.conf', 'suricata.yaml')
+    if filename not in allowed_files:
         return jsonify({"error": "Invalid config filename specified."}), 400
     
     data = request.get_json()
@@ -205,6 +209,21 @@ def save_config_file(filename):
          return jsonify({"error": "Invalid content format, must be a string."}), 400
 
     try:
+        # Si on sauvegarde suricata.yaml, on pourrait ajouter une validation YAML basique?
+        if filename == 'suricata.yaml':
+            try:
+                import yaml # Assurez-vous que PyYAML est installé (à ajouter aux requirements)
+                yaml.safe_load(content) 
+                logger.info("YAML syntax appears valid for suricata.yaml")
+            except ImportError:
+                 logger.warning("PyYAML not installed, skipping YAML validation.")
+            except yaml.YAMLError as yaml_err:
+                 logger.error(f"Invalid YAML syntax detected in suricata.yaml: {yaml_err}")
+                 # Renvoyer une erreur spécifique pour YAML invalide
+                 return jsonify({"error": f"Invalid YAML syntax: {yaml_err}"}), 400 
+            except Exception as e:
+                 logger.error(f"Error during YAML validation: {e}") # Autre erreur potentielle
+
         write_config_file(filename, content)
         return jsonify({"status": "success", "message": f"{filename} saved successfully."})
     except Exception as e:
@@ -258,16 +277,22 @@ def run_suricata_update():
 # --- ENDPOINT POUR LE STREAMING DES LOGS (SSE) --- 
 @app.route('/api/logs/stream')
 def stream_logs():
-    """Endpoint SSE pour streamer les nouvelles lignes d'eve.json."""
-    eve_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, EVE_JSON_FILE)
-    logger.info(f"Starting log stream for {eve_path}")
+    """Endpoint SSE pour streamer les nouvelles lignes du fichier log spécifié."""
+    # Récupérer le nom du fichier depuis les arguments de la requête
+    logfile_name = request.args.get('logfile', 'eve.json') # Par défaut eve.json
+    allowed_logs = ('eve.json', 'suricata.log')
 
-    if not os.path.exists(eve_path):
-        logger.error(f"Cannot start stream: Log file not found at {eve_path}")
-        # On ne peut pas vraiment renvoyer une erreur standard ici car c'est un stream
-        # Le client devra gérer l'échec de connexion
+    if logfile_name not in allowed_logs:
+        logger.warning(f"Log stream request for invalid file: {logfile_name}. Defaulting to eve.json")
+        logfile_name = 'eve.json'
+        
+    log_path = os.path.join(app.root_path, LOGS_FOLDER_PATH, logfile_name)
+    logger.info(f"Starting log stream for {log_path}")
+
+    if not os.path.exists(log_path):
+        logger.error(f"Cannot start stream: Log file not found at {log_path}")
         def error_generator():
-             yield f"data: {json.dumps({'error': 'Log file not found'})}\n\n"
+             yield f"data: {json.dumps({'error': f'Log file {logfile_name} not found'})}\n\n"
         return Response(error_generator(), mimetype='text/event-stream')
 
     def generate():
@@ -275,20 +300,20 @@ def stream_logs():
         # On lit depuis la fin du fichier.
         try:
             # D'abord, positionner à la fin
-            with open(eve_path, 'r') as f:
+            with open(log_path, 'r') as f:
                  f.seek(0, os.SEEK_END)
                  # logger.info("Positioned at the end of the log file.")
             
             # Lancer tail -f --follow=name --retry pour gérer la rotation
             # Le conteneur doit avoir `tail` (normalement présent dans les images debian/python slim)
             proc = subprocess.Popen([
-                    'tail', '-n', '0', '--follow=name', '--retry', eve_path
+                    'tail', '-n', '0', '--follow=name', '--retry', log_path
                  ], 
                  stdout=subprocess.PIPE, 
                  stderr=subprocess.PIPE, 
                  text=True)
             
-            logger.info(f"tail -f process started for {eve_path}")
+            logger.info(f"tail -f process started for {log_path}")
             
             while True:
                  line = proc.stdout.readline()

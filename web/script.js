@@ -11,9 +11,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const reloadStatusDiv = document.getElementById('reload-status');
     const updateOutputPre = document.getElementById('update-output');
 
+    // AJOUT: Éléments pour la config principale
+    const mainConfigTextarea = document.getElementById('suricata-yaml-content');
+    const saveMainConfigButton = document.getElementById('save-main-config-btn');
+    const mainConfigStatusMessage = document.getElementById('main-config-status-message');
+    const postSaveMainConfigInfoDiv = document.getElementById('post-save-main-config-info');
+
     // AJOUT: Éléments pour les logs en direct et graphique temporel
     const liveLogContent = document.getElementById('live-log-content');
     const logStreamStatus = document.getElementById('log-stream-status');
+    const selectEveButton = document.getElementById('select-eve-btn');
+    const selectSuricataButton = document.getElementById('select-suricata-btn');
+    const currentLogfileSpan = document.getElementById('current-logfile');
     let eventSource = null; // Pour stocker l'instance EventSource
     const MAX_LOG_LINES = 500; // Limiter le nombre de lignes dans le log en direct
     let currentLogLines = [];
@@ -334,11 +343,13 @@ document.addEventListener('DOMContentLoaded', () => {
             textareaElement.value = data.content;
             console.log(`${filename} loaded successfully.`);
         } catch (error) {
+            // Utiliser le bon message de statut selon le fichier
+            const statusElement = filename === 'suricata.yaml' ? mainConfigStatusMessage : configStatusMessage;
             console.error(`Erreur lors du chargement de ${filename}:`, error);
             textareaElement.value = `Erreur chargement: ${error.message}`;
             textareaElement.classList.add('is-invalid'); // Indicate error visually
-            configStatusMessage.textContent = `Erreur chargement ${filename}.`;
-            configStatusMessage.className = 'ms-3 text-danger';
+            statusElement.textContent = `Erreur chargement ${filename}.`;
+            statusElement.className = 'ms-3 text-danger';
         }
     };
 
@@ -346,7 +357,10 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAllChartData(); // Charger tous les graphiques
     fetchConfigFile('enable.conf', enableConfTextarea);
     fetchConfigFile('disable.conf', disableConfTextarea);
-    connectLogStream(); // Démarrer le flux de logs
+    // AJOUT: Charger la config principale
+    fetchConfigFile('suricata.yaml', mainConfigTextarea);
+    // Ne pas démarrer le flux automatiquement, attendre la sélection
+    // connectLogStream(); 
 
     if (refreshChartsButton) {
         refreshChartsButton.addEventListener('click', loadAllChartData); // Rafraîchir tous les graphiques
@@ -572,15 +586,61 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- NOUVEAU: Event listener pour le bouton de sauvegarde de suricata.yaml
+    if (saveMainConfigButton) {
+        saveMainConfigButton.addEventListener('click', async () => {
+            mainConfigStatusMessage.textContent = 'Sauvegarde de suricata.yaml...';
+            mainConfigStatusMessage.className = 'ms-3 text-info';
+            saveMainConfigButton.disabled = true;
+            postSaveMainConfigInfoDiv.style.display = 'none'; // Cacher l'info post-save
+
+            const filename = 'suricata.yaml';
+            const content = mainConfigTextarea.value;
+
+             try {
+                 const response = await fetch(`/api/config/${filename}`, {
+                     method: 'POST',
+                     headers: {'Content-Type': 'application/json'},
+                     body: JSON.stringify({ content: content })
+                 });
+                 const result = await response.json();
+                 if (!response.ok) {
+                     // Utiliser result.error si présent (ex: erreur YAML), sinon message générique
+                     throw new Error(result.error || `Erreur HTTP ${response.status}`);
+                 }
+                 console.log(`${filename} saved successfully.`);
+                 mainConfigTextarea.classList.remove('is-invalid');
+                 mainConfigStatusMessage.textContent = 'suricata.yaml sauvegardé avec succès.';
+                 mainConfigStatusMessage.className = 'ms-3 text-success';
+                 postSaveMainConfigInfoDiv.style.display = 'block'; // Afficher les instructions
+             } catch (error) {
+                 console.error(`Erreur lors de la sauvegarde de ${filename}:`, error);
+                 mainConfigStatusMessage.textContent = `Erreur sauvegarde ${filename}: ${error.message}`;
+                 mainConfigStatusMessage.className = 'ms-3 text-danger';
+                 mainConfigTextarea.classList.add('is-invalid');
+             } finally {
+                 saveMainConfigButton.disabled = false;
+             }
+        });
+    }
+
     // --- NOUVEAU: Log Streaming (SSE) ---
-    const connectLogStream = () => {
+    const connectLogStream = (filename = 'eve.json') => { // Accepte le nom de fichier
         if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-             console.log("Log stream already open.");
-             return;
+            // Si on demande le même fichier, ne rien faire
+            // Sinon, fermer la connexion existante
+            const currentUrl = new URL(eventSource.url);
+            if (currentUrl.searchParams.get('logfile') === filename) {
+                console.log(`Log stream already open for ${filename}.`);
+                return;
+            }
+            console.log("Closing existing log stream...");
+            eventSource.close();
         }
 
-        console.log("Connecting to log stream...");
-        eventSource = new EventSource('/api/logs/stream');
+        console.log(`Connecting to log stream for ${filename}...`);
+        eventSource = new EventSource(`/api/logs/stream?logfile=${encodeURIComponent(filename)}`); // Ajouter le paramètre
+        currentLogfileSpan.textContent = filename; // Mettre à jour le titre
         currentLogLines = ["Connexion au flux de logs..."]; // Reset log display
         liveLogContent.textContent = currentLogLines.join('\n');
 
@@ -648,4 +708,23 @@ document.addEventListener('DOMContentLoaded', () => {
             eventSource.close(); // Fermer pour éviter les tentatives de reconnexion infinies?
         };
     };
+
+    // AJOUT: Event listeners pour les boutons de sélection de log
+    const setupLogSelection = () => {
+        const buttons = [selectEveButton, selectSuricataButton];
+        buttons.forEach(button => {
+            if (button) {
+                button.addEventListener('click', () => {
+                    const logfile = button.getAttribute('data-logfile');
+                    console.log(`Log file selection clicked: ${logfile}`);
+                    // Mettre à jour l'apparence des boutons
+                    buttons.forEach(btn => btn?.classList.replace('btn-outline-light', 'btn-outline-secondary'));
+                    button.classList.replace('btn-outline-secondary', 'btn-outline-light');
+                    // Connecter au bon flux
+                    connectLogStream(logfile);
+                });
+            }
+        });
+    };
+    setupLogSelection();
 }); 
